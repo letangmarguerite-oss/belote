@@ -161,7 +161,9 @@ export interface GameSummary {
   id: string;
   table_id: string;
   started_at: string;
+  /** Renseigné une fois la partie close, gagnée ou abandonnée. */
   ended_at: string | null;
-  final_scores: { totals: [number, number] } | null;
+  /** Mis à jour après chaque donne, pas seulement à la fin. */
+  final_scores: { totals: [number, number]; completed?: boolean } | null;
   seat: number;
 }

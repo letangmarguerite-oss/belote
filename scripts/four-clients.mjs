@@ -494,6 +494,15 @@ async function main() {
   const games = await api("/api/games", { token: clients[0].token });
   check("la partie apparait dans l'historique", games.length >= 1, `${games.length}`);
 
+  // Le score doit etre lisible sans attendre la fin du match : sinon toute
+  // partie non menee a 1000 points reste affichee "en cours", sans resultat.
+  const totals = games[0].final_scores?.totals;
+  check(
+    "le score est enregistre des la premiere donne",
+    Array.isArray(totals) && totals[0] + totals[1] > 0,
+    JSON.stringify(games[0].final_scores),
+  );
+
   const detail = await settledLog(games[0].id, clients[0].token);
   check(
     "le journal complet est persiste",

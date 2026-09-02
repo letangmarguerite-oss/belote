@@ -40,7 +40,7 @@ const REDEAL_PAUSE: Duration = Duration::from_secs(2);
 const TRICK_PAUSE: Duration = Duration::from_millis(1600);
 const TICK: Duration = Duration::from_millis(200);
 /// Une table sans personne finit par liberer sa tache.
-const IDLE_SHUTDOWN: Duration = Duration::from_secs(600);
+const IDLE_SHUTDOWN: Duration = Duration::from_secs(180);
 /// Delai au-dela duquel on commence sans les joueurs qui ne se connectent pas.
 const WAIT_FOR_PLAYERS: Duration = Duration::from_secs(60);
 
@@ -82,9 +82,17 @@ pub enum PersistMsg {
         seq: u32,
         payload: serde_json::Value,
     },
+    /// Score courant, apres chaque donne. L'historique reste ainsi lisible
+    /// meme pour une partie qu'on abandonne en cours de route.
+    Progress {
+        game_id: Uuid,
+        totals: [u16; 2],
+    },
     Finish {
         game_id: Uuid,
         totals: [u16; 2],
+        /// Faux quand la table se vide avant qu'une equipe ait gagne.
+        completed: bool,
     },
 }
 
@@ -194,6 +202,8 @@ impl TableActor {
                 }
             }
         }
+        // La table se vide : la partie en cours n'ira pas plus loin.
+        self.close_game();
         tracing::info!(table = %self.join_code, "table liberee");
     }
 
@@ -355,6 +365,9 @@ impl TableActor {
     // -----------------------------------------------------------------------
 
     async fn start_match(&mut self) {
+        // Un nouveau match sur la meme table clot le precedent.
+        self.close_game();
+
         let game_id = Uuid::now_v7();
 
         if let Err(err) = self.insert_game(game_id).await {
@@ -451,6 +464,15 @@ impl TableActor {
         self.carry = score.carry_out;
         self.dealer = self.dealer.next();
 
+        // Le score est enregistre a chaque donne, pas seulement a la fin : une
+        // partie interrompue garde ainsi un resultat consultable.
+        if let Some(game_id) = self.game_id {
+            let _ = self.persist.send(PersistMsg::Progress {
+                game_id,
+                totals: self.totals,
+            });
+        }
+
         let high = self.totals[0].max(self.totals[1]);
         if high >= TARGET_POINTS && self.totals[0] != self.totals[1] {
             let winner = if self.totals[0] > self.totals[1] { 0 } else { 1 };
@@ -460,10 +482,28 @@ impl TableActor {
                 let _ = self.persist.send(PersistMsg::Finish {
                     game_id,
                     totals: self.totals,
+                    completed: true,
                 });
             }
             tracing::info!(table = %self.join_code, winner, totals = ?self.totals, "match termine");
         }
+    }
+
+    /// Clot la partie en cours en base. Appele quand la table se vide ou
+    /// quand un nouveau match commence : sans cela, une partie abandonnee
+    /// resterait indefiniment "en cours" dans l'historique.
+    fn close_game(&mut self) {
+        let Some(game_id) = self.game_id.take() else {
+            return;
+        };
+        if self.winner.is_some() {
+            return; // deja close par settle()
+        }
+        let _ = self.persist.send(PersistMsg::Finish {
+            game_id,
+            totals: self.totals,
+            completed: false,
+        });
     }
 
     /// Programme la prochaine action automatique.
@@ -758,7 +798,8 @@ pub fn spawn_persister(pool: PgPool) -> mpsc::UnboundedSender<PersistMsg> {
         let mut batch: Vec<(Uuid, i32, serde_json::Value)> = Vec::with_capacity(PERSIST_BATCH);
 
         while let Some(first) = rx.recv().await {
-            let mut finish: Option<(Uuid, [u16; 2])> = None;
+            let mut progress: Option<(Uuid, [u16; 2])> = None;
+            let mut finish: Option<(Uuid, [u16; 2], bool)> = None;
             let mut pending = Some(first);
 
             // On vide ce qui est deja arrive pour l'ecrire d'un seul coup.
@@ -769,7 +810,14 @@ pub fn spawn_persister(pool: PgPool) -> mpsc::UnboundedSender<PersistMsg> {
                         seq,
                         payload,
                     } => batch.push((game_id, seq as i32, payload)),
-                    PersistMsg::Finish { game_id, totals } => finish = Some((game_id, totals)),
+                    PersistMsg::Progress { game_id, totals } => {
+                        progress = Some((game_id, totals))
+                    }
+                    PersistMsg::Finish {
+                        game_id,
+                        totals,
+                        completed,
+                    } => finish = Some((game_id, totals, completed)),
                 }
                 if batch.len() < PERSIST_BATCH {
                     pending = rx.try_recv().ok();
@@ -790,9 +838,22 @@ pub fn spawn_persister(pool: PgPool) -> mpsc::UnboundedSender<PersistMsg> {
                 }
             }
 
+            // Score courant, sans clore la partie.
+            if let Some((game_id, totals)) = progress {
+                let result = sqlx::query("update games set final_scores = $2 where id = $1")
+                    .bind(game_id)
+                    .bind(serde_json::json!({ "totals": totals, "completed": false }))
+                    .execute(&pool)
+                    .await;
+
+                if let Err(err) = result {
+                    tracing::error!(?err, "mise a jour du score impossible");
+                }
+            }
+
             // La cloture vient apres, pour qu'une partie marquee terminee ait
             // bien tout son journal derriere elle.
-            if let Some((game_id, totals)) = finish {
+            if let Some((game_id, totals, completed)) = finish {
                 let result = sqlx::query(
                     "update games
                         set ended_at = now(),
@@ -800,7 +861,7 @@ pub fn spawn_persister(pool: PgPool) -> mpsc::UnboundedSender<PersistMsg> {
                       where id = $1",
                 )
                 .bind(game_id)
-                .bind(serde_json::json!({ "totals": totals }))
+                .bind(serde_json::json!({ "totals": totals, "completed": completed }))
                 .execute(&pool)
                 .await;
 

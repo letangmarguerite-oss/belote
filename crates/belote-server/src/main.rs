@@ -58,6 +58,27 @@ async fn main() -> anyhow::Result<()> {
         .context("les migrations ont echoue")?;
     tracing::info!("migrations a jour");
 
+    // Une partie ouverte sans tache pour la porter ne reprendra jamais : elle
+    // date d'un arret precedent. On la clot, sans quoi elle resterait affichee
+    // "en cours" indefiniment dans l'historique des joueurs.
+    let orphans = sqlx::query(
+        r#"update games
+              set ended_at = now(),
+                  final_scores = coalesce(final_scores, '{}'::jsonb)
+                                 || '{"completed": false}'::jsonb
+            where ended_at is null"#,
+    )
+    .execute(&pool)
+    .await
+    .context("cloture des parties orphelines impossible")?;
+
+    if orphans.rows_affected() > 0 {
+        tracing::info!(
+            parties = orphans.rows_affected(),
+            "parties laissees ouvertes par un arret precedent, cloturees"
+        );
+    }
+
     let port = config.port;
     let persist = table::spawn_persister(pool.clone());
     let state = AppState {

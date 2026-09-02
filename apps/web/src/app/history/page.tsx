@@ -43,8 +43,18 @@ function GameList() {
       {games.map((game) => {
         const myTeam = game.seat % 2;
         const totals = game.final_scores?.totals;
-        const finished = !!game.ended_at && !!totals;
-        const won = finished && totals[myTeam] > totals[1 - myTeam];
+        const closed = !!game.ended_at;
+        // Une partie close sans vainqueur a ete abandonnee en cours de route :
+        // le score reste affiche, mais ce n'est ni une victoire ni une defaite.
+        const completed = closed && game.final_scores?.completed === true;
+        const won = !!totals && totals[myTeam] > totals[1 - myTeam];
+
+        let label: string;
+        if (!closed) label = "En cours";
+        else if (completed) label = won ? "Victoire" : "Défaite";
+        else if (totals && (totals[0] > 0 || totals[1] > 0))
+          label = "Interrompue";
+        else label = "Sans donne jouée";
 
         return (
           <li
@@ -58,13 +68,11 @@ function GameList() {
                   timeStyle: "short",
                 })}
               </p>
-              <p className="text-xs text-bone-dim">
-                {finished ? (won ? "Victoire" : "Défaite") : "Partie en cours"}
-              </p>
+              <p className="text-xs text-bone-dim">{label}</p>
             </div>
             {totals && (
               <p className="shrink-0 font-display text-lg">
-                <span className={won ? "text-gold" : "text-bone"}>
+                <span className={completed && won ? "text-gold" : "text-bone"}>
                   {totals[myTeam]}
                 </span>
                 <span className="text-bone-dim"> — {totals[1 - myTeam]}</span>
