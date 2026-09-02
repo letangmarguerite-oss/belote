@@ -1,8 +1,14 @@
 "use client";
 
 import { CardBack, PlayingCard } from "./PlayingCard";
-import { SUIT_SYMBOL, isRed, positionOf, type Position } from "@/lib/cards";
-import type { PlayerView, Seat, SeatInfo } from "@/lib/types";
+import {
+  SUIT_LABEL,
+  SUIT_SYMBOL,
+  isRed,
+  positionOf,
+  type Position,
+} from "@/lib/cards";
+import type { PlayerView, Seat, SeatInfo, Suit } from "@/lib/types";
 import type { HeldTrick } from "@/store/game";
 
 interface Props {
@@ -13,26 +19,32 @@ interface Props {
   heldTrick: HeldTrick | null;
 }
 
-/** Le tapis : les trois adversaires autour, le pli en cours au centre. */
+/** Le tapis : les quatre joueurs autour, le pli en cours au centre. */
 export function TableFelt({ view, seats, mySeat, heldTrick }: Props) {
-  const byPosition = (position: Position) =>
+  const at = (position: Position) =>
     ([0, 1, 2, 3] as Seat[]).find((s) => positionOf(s, mySeat) === position)!;
 
   return (
     <div className="relative mx-auto w-full max-w-3xl flex-1">
-      <div className="grid h-full grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] gap-1 sm:gap-3">
+      <div className="grid h-full grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto] gap-1 sm:gap-3">
         <div className="col-span-3 flex justify-center">
-          <Opponent seat={byPosition("north")} view={view} seats={seats} layout="row" />
+          <SeatPlate seat={at("north")} view={view} seats={seats} layout="row" />
         </div>
 
         <div className="flex items-center justify-start">
-          <Opponent seat={byPosition("west")} view={view} seats={seats} layout="column" />
+          <SeatPlate seat={at("west")} view={view} seats={seats} layout="column" />
         </div>
 
         <Trick view={view} mySeat={mySeat} heldTrick={heldTrick} />
 
         <div className="flex items-center justify-end">
-          <Opponent seat={byPosition("east")} view={view} seats={seats} layout="column" />
+          <SeatPlate seat={at("east")} view={view} seats={seats} layout="column" />
+        </div>
+
+        {/* Mon propre bandeau : sans lui je ne saurais pas que je suis
+            preneur ou donneur, alors que je le vois pour les autres. */}
+        <div className="col-span-3 flex justify-center">
+          <SeatPlate seat={mySeat} view={view} seats={seats} layout="none" />
         </div>
       </div>
     </div>
@@ -41,7 +53,37 @@ export function TableFelt({ view, seats, mySeat, heldTrick }: Props) {
 
 // ---------------------------------------------------------------------------
 
-function Opponent({
+/**
+ * Le jeton d'atout, pose devant le preneur : on voit d'un coup d'oeil qui a
+ * pris et a quelle couleur, sans avoir a s'en souvenir.
+ */
+function TrumpToken({ suit }: { suit: Suit }) {
+  return (
+    <span
+      className="inline-flex size-6 items-center justify-center rounded-[0.35rem] border border-gold bg-ink-950 text-sm leading-none shadow-[0_1px_3px_rgba(0,0,0,0.6)]"
+      style={{ color: isRed(suit) ? "var(--color-ruby)" : "var(--color-bone)" }}
+      title={`Preneur — atout ${SUIT_LABEL[suit].toLowerCase()}`}
+      aria-label={`preneur, atout ${SUIT_LABEL[suit].toLowerCase()}`}
+    >
+      {SUIT_SYMBOL[suit]}
+    </span>
+  );
+}
+
+/** Le jeton de donneur, qui tourne d'un siege a chaque donne. */
+function DealerChip() {
+  return (
+    <span
+      className="inline-flex size-5 items-center justify-center rounded-full border border-bone/45 text-[0.6rem] font-bold text-bone-dim"
+      title="Donneur"
+      aria-label="donneur"
+    >
+      D
+    </span>
+  );
+}
+
+function SeatPlate({
   seat,
   view,
   seats,
@@ -50,21 +92,21 @@ function Opponent({
   seat: Seat;
   view: PlayerView;
   seats: SeatInfo[];
-  layout: "row" | "column";
+  /** "none" pour mon siege : ma main est affichee en dessous. */
+  layout: "row" | "column" | "none";
 }) {
   const info = seats.find((s) => s.seat === seat);
   const count = view.hand_sizes[seat];
   const isTurn = view.turn === seat && view.phase !== "finished";
   const isTaker = view.taker === seat;
+  const isDealer = view.dealer === seat;
 
   return (
-    <div
-      className={`flex items-center gap-2 ${layout === "column" ? "flex-col" : "flex-col"}`}
-    >
+    <div className="flex flex-col items-center gap-1.5">
       <div
         className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition-colors sm:text-sm ${
           isTurn
-            ? "bg-gold text-ink-950 font-semibold"
+            ? "bg-gold font-semibold text-ink-950"
             : "bg-ink-900/70 text-bone-dim"
         }`}
       >
@@ -80,33 +122,36 @@ function Opponent({
             info?.is_bot
               ? "Bot"
               : info?.connected
-                ? "Connecte"
-                : "Deconnecte, un bot le remplace"
+                ? "Connecté"
+                : "Déconnecté, un bot le remplace"
           }
         />
-        <span className="max-w-24 truncate">{info?.display_name ?? "…"}</span>
-        {isTaker && <span title="Preneur">★</span>}
+        <span className="max-w-28 truncate">{info?.display_name ?? "…"}</span>
+        {isDealer && <DealerChip />}
+        {isTaker && view.trump && <TrumpToken suit={view.trump} />}
       </div>
 
-      <div
-        className={`flex ${layout === "column" ? "flex-col" : "flex-row"}`}
-        aria-label={`${count} cartes`}
-      >
-        {Array.from({ length: count }).map((_, i) => (
-          <div
-            key={i}
-            className="shrink-0"
-            style={{
-              width: layout === "column" ? "1.6rem" : "1.5rem",
-              aspectRatio: "100 / 150",
-              marginLeft: layout === "row" && i > 0 ? "-0.85rem" : 0,
-              marginTop: layout === "column" && i > 0 ? "-1.55rem" : 0,
-            }}
-          >
-            <CardBack />
-          </div>
-        ))}
-      </div>
+      {layout !== "none" && (
+        <div
+          className={`flex ${layout === "column" ? "flex-col" : "flex-row"}`}
+          aria-label={`${count} cartes`}
+        >
+          {Array.from({ length: count }).map((_, i) => (
+            <div
+              key={i}
+              className="shrink-0"
+              style={{
+                width: layout === "column" ? "1.6rem" : "1.5rem",
+                aspectRatio: "100 / 150",
+                marginLeft: layout === "row" && i > 0 ? "-0.85rem" : 0,
+                marginTop: layout === "column" && i > 0 ? "-1.55rem" : 0,
+              }}
+            >
+              <CardBack />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -174,7 +219,13 @@ function Trick({
   );
 }
 
-/** Bandeau de score : atout, plis, points, total du match. */
+/**
+ * Bandeau de score.
+ *
+ * Les points de la donne en cours n'y figurent pas : a la belote on les
+ * compte en ramassant, pas en cours de route. Le decompte s'affiche a la fin
+ * de la donne, dans le panneau de resultat.
+ */
 export function Scoreboard({
   view,
   totals,
@@ -192,25 +243,8 @@ export function Scoreboard({
   return (
     <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs sm:text-sm">
       <span className="text-bone-dim">
-        Atout{" "}
-        {view.trump ? (
-          <span
-            className="text-base font-semibold"
-            style={{ color: isRed(view.trump) ? "var(--color-ruby)" : "var(--color-bone)" }}
-          >
-            {SUIT_SYMBOL[view.trump]}
-          </span>
-        ) : (
-          "—"
-        )}
-      </span>
-      <span className="text-bone-dim">
         Plis <span className="text-bone">{view.tricks_won[myTeam]}</span> —{" "}
         <span className="text-bone">{view.tricks_won[them]}</span>
-      </span>
-      <span className="text-bone-dim">
-        Donne <span className="text-bone">{view.card_points[myTeam]}</span> —{" "}
-        <span className="text-bone">{view.card_points[them]}</span>
       </span>
       <span className="text-gold">
         Match {totals[myTeam]} — {totals[them]}

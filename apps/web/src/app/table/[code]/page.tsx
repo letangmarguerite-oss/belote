@@ -8,7 +8,7 @@ import { Hand } from "@/components/Hand";
 import { Lobby } from "@/components/Lobby";
 import { Scoreboard, TableFelt } from "@/components/TableFelt";
 import { Shell } from "@/components/Shell";
-import { SUIT_LABEL } from "@/lib/cards";
+import { SUIT_LABEL, SUIT_SYMBOL, isRed } from "@/lib/cards";
 import type { DealScore, Seat, SeatInfo } from "@/lib/types";
 import { useAuth } from "@/store/auth";
 import { useGame } from "@/store/game";
@@ -201,7 +201,21 @@ function DealResult({
             : "Dedans"}
       </p>
       <p className="text-xs text-bone-dim">
-        Atout {SUIT_LABEL[score.trump].toLowerCase()}
+        Pris par{" "}
+        <span className="text-bone">
+          {seats.find((s) => s.seat === score.taker)?.display_name ?? "?"}
+        </span>{" "}
+        à {SUIT_LABEL[score.trump].toLowerCase()}
+        <span
+          className="ml-1"
+          style={{
+            color: isRed(score.trump)
+              ? "var(--color-ruby)"
+              : "var(--color-bone)",
+          }}
+        >
+          {SUIT_SYMBOL[score.trump]}
+        </span>
         {score.capot !== null && " · capot"}
         {score.belote !== null && " · belote"}
       </p>

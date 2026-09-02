@@ -238,6 +238,11 @@ impl TableActor {
                 self.conns.push(Conn { conn_id, seat, tx });
                 self.empty_since = None;
 
+                // Les noms des joueurs partent avant tout evenement de jeu :
+                // la premiere distribution s'annonce sinon avec des numeros
+                // de siege au lieu des pseudos.
+                self.broadcast_seats();
+
                 if self.game_id.is_none() {
                     self.waiting_since.get_or_insert_with(Instant::now);
                     // Table entre amis : elle reste au salon d'attente, le
@@ -256,7 +261,6 @@ impl TableActor {
                     // le delai de reflexion redevient un delai humain.
                     self.schedule();
                 }
-                self.broadcast_seats();
             }
 
             Cmd::Disconnect { conn_id } => {

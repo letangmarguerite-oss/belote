@@ -228,10 +228,15 @@ function handleEvent(event: PublicEvent, set: Setter, get: Getter) {
       break;
     }
 
-    case "dealt":
+    case "dealt": {
       running = [];
       clearHold(set);
+      // Le donneur et l'entameur sont l'information la plus utile a cet
+      // instant precis, et la plus vite oubliee ensuite.
+      const first = ((event.dealer + 1) % 4) as Seat;
+      flash(`${nameOf(event.dealer)} distribue · ${nameOf(first)} commence`);
       break;
+    }
 
     case "passed":
       flash(`${nameOf(event.seat)} passe`);
