@@ -49,6 +49,11 @@ export class GameSocket {
       return;
     }
 
+    // On a pu etre ferme pendant l'attente du ticket. En developpement React
+    // monte les composants deux fois : sans ce controle, la connexion annulee
+    // s'ouvrait quand meme et doublait chaque message recu.
+    if (this.closedByUs) return;
+
     const url = `${wsUrl()}/ws?ticket=${encodeURIComponent(ticket)}&code=${encodeURIComponent(this.code)}`;
     const ws = new WebSocket(url);
     this.ws = ws;
@@ -69,6 +74,8 @@ export class GameSocket {
     });
 
     ws.addEventListener("message", (event) => {
+      // Un socket remplace par une reconnexion ne doit plus rien remonter.
+      if (this.ws !== ws || this.closedByUs) return;
       try {
         this.handlers.onMessage(JSON.parse(event.data as string) as ServerMsg);
       } catch {

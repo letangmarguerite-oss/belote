@@ -85,9 +85,16 @@ export const useGame = create<GameState>((set, get) => ({
     running = [];
     if (holdTimer) clearTimeout(holdTimer);
 
-    const socket = new GameSocket(code, {
-      onStatus: (status) => set({ status }),
-      onMessage: (msg) => applyMessage(msg, set, get),
+    // `socket` est capture pour se comparer plus bas : un socket remplace ne
+    // doit plus toucher a l'etat, sous peine de dedoubler chaque carte posee.
+    const socket: GameSocket = new GameSocket(code, {
+      onStatus: (status) => {
+        if (get().socket === socket) set({ status });
+      },
+      onMessage: (msg) => {
+        if (get().socket !== socket) return;
+        applyMessage(msg, set, get);
+      },
     });
 
     set({ socket, joinCode: code, error: null, heldTrick: null });
@@ -195,7 +202,12 @@ function handleEvent(event: PublicEvent, set: Setter, get: Getter) {
         running = [];
         clearHold(set);
       }
-      running = [...running, { seat: event.seat, card: event.card }];
+      // Un siege ne pose qu'une carte par pli : si on le revoit, c'est un
+      // doublon (message rejoue apres une reconnexion, par exemple).
+      running = [
+        ...running.filter((p) => p.seat !== event.seat),
+        { seat: event.seat, card: event.card },
+      ];
       break;
 
     case "trick_taken": {

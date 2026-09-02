@@ -150,7 +150,9 @@ function Trick({
         const wins = heldTrick?.winner === played.seat;
         return (
           <div
-            key={played.seat}
+            // La carte identifie l'entree mieux que le siege : elle reste
+            // unique meme si un message arrive en double.
+            key={`${played.seat}-${played.card.rank}-${played.card.suit}`}
             className={`animate-deal absolute w-14 transition-transform duration-300 sm:w-16 ${slot[positionOf(played.seat, mySeat)]}`}
             style={{
               aspectRatio: "100 / 150",
