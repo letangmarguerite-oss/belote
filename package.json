@@ -1,0 +1,10 @@
+{
+  "name": "jeux1",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=web"
+  }
+}

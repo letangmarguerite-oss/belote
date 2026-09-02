@@ -1,0 +1,44 @@
+[package]
+name = "belote-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Serveur de belote : HTTP (comptes, tables, historique) et WebSocket (jeu)."
+
+[dependencies]
+belote-core = { path = "../belote-core" }
+
+axum = { version = "0.8", features = ["ws", "macros"] }
+axum-extra = { version = "0.10", features = ["cookie"] }
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+futures-util = "0.3"
+
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio",
+    "tls-rustls-ring",
+    "macros",
+    "postgres",
+    "uuid",
+    "time",
+    "json",
+    "migrate",
+] }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
+time = { version = "0.3", features = ["serde"] }
+
+argon2 = "0.5"
+jsonwebtoken = "9"
+sha2 = "0.10"
+base64 = "0.22"
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+
+thiserror = { workspace = true }
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dotenvy = "0.15"

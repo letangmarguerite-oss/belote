@@ -1,0 +1,20 @@
+# Rust
+/target
+**/*.rs.bk
+
+# Node
+node_modules/
+.next/
+out/
+.turbo/
+
+# Env
+.env
+.env.local
+.env*.local
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
