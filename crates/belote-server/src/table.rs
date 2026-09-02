@@ -65,6 +65,10 @@ pub enum Cmd {
     Ready {
         user_id: Uuid,
     },
+    /// Le proprietaire lance la partie depuis le salon d'attente.
+    Start {
+        user_id: Uuid,
+    },
     Resync {
         conn_id: u64,
     },
@@ -106,6 +110,10 @@ pub struct TableActor {
     persist: mpsc::UnboundedSender<PersistMsg>,
     table_id: Uuid,
     join_code: String,
+    /// Qui a cree la table : seul lui peut la lancer.
+    owner_id: Uuid,
+    /// Vrai pour une partie solo : elle demarre sans attendre.
+    autostart: bool,
     game_id: Option<Uuid>,
     occupants: [Occupant; 4],
     conns: Vec<Conn>,
@@ -131,16 +139,24 @@ impl TableActor {
     pub fn spawn(
         pool: PgPool,
         persist: mpsc::UnboundedSender<PersistMsg>,
-        table_id: Uuid,
-        join_code: String,
-        occupants: [Occupant; 4],
+        table: TableRecord,
     ) -> mpsc::Sender<Cmd> {
+        let TableRecord {
+            table_id,
+            join_code,
+            owner_id,
+            autostart,
+            occupants,
+        } = table;
+
         let (tx, rx) = mpsc::channel(64);
         let actor = TableActor {
             pool,
             persist,
             table_id,
             join_code,
+            owner_id,
+            autostart,
             game_id: None,
             occupants,
             conns: Vec::new(),
@@ -214,10 +230,15 @@ impl TableActor {
 
                 if self.game_id.is_none() {
                     self.waiting_since.get_or_insert_with(Instant::now);
-                    // On n'entame pas sans les amis : sinon un bot jouerait a
-                    // la place de celui dont la page n'a pas fini de charger.
-                    if self.all_humans_connected() {
+                    // Table entre amis : elle reste au salon d'attente, le
+                    // temps de partager le code. Partie solo : on entame des
+                    // que le joueur est la — mais jamais avant que tous les
+                    // humains attendus soient connectes, sinon un bot jouerait
+                    // a la place d'une page qui charge encore.
+                    if self.autostart && self.all_humans_connected() {
                         self.start_match().await;
+                    } else {
+                        self.broadcast_snapshot();
                     }
                 } else {
                     self.broadcast_snapshot();
@@ -261,6 +282,15 @@ impl TableActor {
                 }
             }
 
+            Cmd::Start { user_id } => {
+                // Seul le proprietaire lance la table, et une seule fois.
+                if user_id != self.owner_id || self.game_id.is_some() {
+                    return;
+                }
+                self.start_match().await;
+                self.broadcast_seats();
+            }
+
             Cmd::Resync { conn_id } => {
                 if let Some(conn) = self.conns.iter().find(|c| c.conn_id == conn_id) {
                     let msg = self.snapshot_for(conn.seat);
@@ -280,12 +310,15 @@ impl TableActor {
             return false;
         }
 
-        // Un joueur ne repond pas a l'appel : au bout d'un moment, on commence
-        // sans lui et un bot tient son siege jusqu'a son arrivee.
+        // Partie solo dont un siege humain ne repond pas : au bout d'un moment
+        // on commence sans lui, un bot tient sa place. Une table entre amis,
+        // elle, attend indefiniment que son proprietaire la lance.
         if self.game_id.is_none() {
-            if let Some(since) = self.waiting_since {
-                if since.elapsed() > WAIT_FOR_PLAYERS {
-                    self.start_match().await;
+            if self.autostart {
+                if let Some(since) = self.waiting_since {
+                    if since.elapsed() > WAIT_FOR_PLAYERS {
+                        self.start_match().await;
+                    }
                 }
             }
             return false;
@@ -505,6 +538,10 @@ impl TableActor {
             winner: self.winner,
             ready: self.ready.iter().copied().collect(),
             awaiting_continue: self.state.phase == Phase::Finished,
+            in_lobby: self.game_id.is_none(),
+            can_start: self.game_id.is_none()
+                && self.occupants[seat.index()].user_id == Some(self.owner_id),
+            join_code: self.join_code.clone(),
         }
     }
 
@@ -609,7 +646,7 @@ impl TableRegistry {
             }
         }
 
-        let (table_id, occupants) = load_table(pool, join_code).await?;
+        let record = load_table(pool, join_code).await?;
 
         let mut guard = self.inner.lock().expect("registre empoisonne");
         // Quelqu'un a pu creer l'acteur pendant qu'on lisait la base.
@@ -618,13 +655,7 @@ impl TableRegistry {
                 return Ok(existing.clone());
             }
         }
-        let tx = TableActor::spawn(
-            pool.clone(),
-            persist.clone(),
-            table_id,
-            join_code.to_string(),
-            occupants,
-        );
+        let tx = TableActor::spawn(pool.clone(), persist.clone(), record);
         guard.insert(join_code.to_string(), tx.clone());
         Ok(tx)
     }
@@ -646,12 +677,22 @@ struct SeatRow {
     is_bot: bool,
 }
 
-async fn load_table(pool: &PgPool, join_code: &str) -> ApiResult<(Uuid, [Occupant; 4])> {
-    let table: Option<(Uuid,)> = sqlx::query_as("select id from game_tables where join_code = $1")
-        .bind(join_code)
-        .fetch_optional(pool)
-        .await?;
-    let (table_id,) = table.ok_or(ApiError::NotFound)?;
+/// Tout ce qu'il faut pour ouvrir une table, lu une fois en base.
+pub struct TableRecord {
+    pub table_id: Uuid,
+    pub join_code: String,
+    pub owner_id: Uuid,
+    pub autostart: bool,
+    pub occupants: [Occupant; 4],
+}
+
+async fn load_table(pool: &PgPool, join_code: &str) -> ApiResult<TableRecord> {
+    let table: Option<(Uuid, Uuid, bool)> =
+        sqlx::query_as("select id, owner_id, autostart from game_tables where join_code = $1")
+            .bind(join_code)
+            .fetch_optional(pool)
+            .await?;
+    let (table_id, owner_id, autostart) = table.ok_or(ApiError::NotFound)?;
 
     let rows: Vec<SeatRow> = sqlx::query_as(
         "select s.seat, s.user_id, u.display_name, s.is_bot
@@ -688,7 +729,13 @@ async fn load_table(pool: &PgPool, join_code: &str) -> ApiResult<(Uuid, [Occupan
         };
     }
 
-    Ok((table_id, occupants))
+    Ok(TableRecord {
+        table_id,
+        join_code: join_code.to_string(),
+        owner_id,
+        autostart,
+        occupants,
+    })
 }
 
 // ---------------------------------------------------------------------------

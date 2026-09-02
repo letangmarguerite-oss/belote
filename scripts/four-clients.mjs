@@ -152,9 +152,13 @@ class Client {
       this.snapshots++;
       this.awaiting = msg.awaiting_continue;
       this.readySeats = msg.ready;
-      // La donne avance vite : on garde le tout premier etat vu, sinon les
-      // verifications sur la distribution initiale arrivent trop tard.
-      if (!this.firstView) this.firstView = msg.view;
+      this.inLobby = msg.in_lobby;
+      this.canStart = msg.can_start;
+      this.seatInfos = msg.seats;
+      // La donne avance vite : on garde le premier etat ou les cartes sont
+      // distribuees, sinon les verifications arrivent trop tard — et les
+      // instantanes du salon d'attente ne contiennent aucune carte.
+      if (!this.firstView && msg.view.hand.length > 0) this.firstView = msg.view;
       this.view = msg.view;
       this.totals = msg.totals;
       this.winner = msg.winner;
@@ -246,7 +250,11 @@ async function main() {
   for (const c of clients) await c.register(uniq);
   check("quatre comptes crees", clients.every((c) => c.token));
 
-  const table = await api("/api/tables", { method: "POST", token: clients[0].token });
+  // Table entre amis : elle doit attendre d'etre lancee, pas demarrer seule.
+  const table = await api("/api/tables?solo=false", {
+    method: "POST",
+    token: clients[0].token,
+  });
   const code = table.join_code;
   for (const c of clients.slice(1)) {
     await api(`/api/tables/${code}/join`, { method: "POST", token: c.token });
@@ -287,6 +295,60 @@ async function main() {
   const seats = clients.map((c) => c.seat);
   check("chacun recoit un siege distinct", new Set(seats).size === 4, JSON.stringify(seats));
   check("le score cible est annonce", clients[0].target === 1000, `${clients[0].target}`);
+
+  // --- Salon d'attente ---------------------------------------------------
+  console.log("\nSalon d'attente");
+  await waitFor(() => clients.every((c) => c.inLobby !== undefined), {
+    label: "les premiers instantanes",
+  });
+  check("la table reste au salon", clients.every((c) => c.inLobby === true));
+  check(
+    "seul le createur peut lancer",
+    clients[0].canStart === true && clients.slice(1).every((c) => c.canStart === false),
+    clients.map((c) => c.canStart).join(","),
+  );
+
+  await new Promise((r) => setTimeout(r, 3000));
+  check(
+    "la partie ne demarre pas toute seule",
+    clients[0].events.filter((e) => e.type === "dealt").length === 0,
+  );
+
+  clients[1].send({ type: "start" });
+  await new Promise((r) => setTimeout(r, 1200));
+  check(
+    "un joueur qui n'est pas l'hote ne peut pas lancer",
+    clients[0].events.filter((e) => e.type === "dealt").length === 0,
+  );
+
+  clients[0].send({ type: "start" });
+  await waitFor(() => clients.every((c) => c.inLobby === false), {
+    label: "le lancement par l'hote",
+  });
+  check("l'hote lance la partie", true);
+
+  // L'autre intention : une partie solo demarre d'elle-meme.
+  const solo = new Client("Solo");
+  await solo.register(uniq);
+  const soloTable = await api("/api/tables?solo=true", {
+    method: "POST",
+    token: solo.token,
+  });
+  await solo.open(soloTable.join_code);
+  await waitFor(() => solo.events.some((e) => e.type === "dealt"), {
+    timeout: 15000,
+    label: "le demarrage de la partie solo",
+  }).catch(() => {});
+  check(
+    "une partie solo demarre sans rien demander",
+    solo.events.some((e) => e.type === "dealt"),
+  );
+  check(
+    "les trois autres sieges y sont des bots",
+    solo.view?.hand_sizes?.length === 4 && solo.seatInfos?.filter?.((s) => s.is_bot).length === 3,
+    JSON.stringify(solo.seatInfos?.map?.((s) => s.is_bot)),
+  );
+  solo.close();
 
   // --- Une donne complete ------------------------------------------------
   console.log("\nDeroulement d'une donne");

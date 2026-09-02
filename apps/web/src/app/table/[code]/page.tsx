@@ -1,10 +1,11 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
 import { BidPanel } from "@/components/BidPanel";
 import { Hand } from "@/components/Hand";
+import { Lobby } from "@/components/Lobby";
 import { Scoreboard, TableFelt } from "@/components/TableFelt";
 import { Shell } from "@/components/Shell";
 import { SUIT_LABEL } from "@/lib/cards";
@@ -31,6 +32,7 @@ function Game({ code }: { code: string }) {
     disconnect,
     act,
     sendReady,
+    sendStart,
     status,
     view,
     seats,
@@ -40,6 +42,8 @@ function Game({ code }: { code: string }) {
     winner,
     ready,
     awaitingContinue,
+    inLobby,
+    canStart,
     heldTrick,
     flashes,
     error,
@@ -62,8 +66,20 @@ function Game({ code }: { code: string }) {
         <p className="text-bone-dim">
           {status === "reconnecting" ? "Reconnexion…" : "Connexion à la table…"}
         </p>
-        <ShareCode code={code} />
       </main>
+    );
+  }
+
+  // Tant que la partie n'est pas lancee, le code reste affiche en grand.
+  if (inLobby) {
+    return (
+      <Lobby
+        code={code}
+        seats={seats}
+        canStart={canStart}
+        onStart={sendStart}
+        onLeave={leave}
+      />
     );
   }
 
@@ -71,7 +87,6 @@ function Game({ code }: { code: string }) {
   // sinon un joueur rapide effacerait de lui-meme ce qu'on lui montre.
   const myTurn =
     view.turn === mySeat && view.phase === "playing" && heldTrick === null;
-  const waiting = seats.some((s) => !s.is_bot && !s.connected);
 
   return (
     <main className="flex flex-1 flex-col gap-2 px-2 pb-2 sm:px-4">
@@ -80,12 +95,6 @@ function Game({ code }: { code: string }) {
           {status === "reconnecting"
             ? "Connexion perdue, reprise en cours…"
             : "Hors ligne"}
-        </Banner>
-      )}
-
-      {waiting && view.phase === "dealing" && (
-        <Banner tone="info">
-          En attente des autres joueurs. <ShareCode code={code} inline />
         </Banner>
       )}
 
@@ -265,33 +274,3 @@ function Banner({
   );
 }
 
-/** Le code de la table, copiable d'un geste pour l'envoyer aux amis. */
-function ShareCode({ code, inline = false }: { code: string; inline?: boolean }) {
-  const [copied, setCopied] = useState(false);
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(
-        `${window.location.origin}/table/${code}`,
-      );
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Le presse-papiers peut etre refuse : le code reste lisible a l'ecran.
-    }
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={copy}
-      className={
-        inline
-          ? "font-display tracking-widest text-gold underline-offset-2 hover:underline"
-          : "panel px-5 py-3 font-display text-2xl tracking-[0.35em] text-gold"
-      }
-    >
-      {copied ? "Lien copié !" : code}
-    </button>
-  );
-}

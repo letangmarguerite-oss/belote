@@ -47,14 +47,18 @@ function SignedOut() {
 function Lobby() {
   const router = useRouter();
   const [code, setCode] = useState("");
-  const [busy, setBusy] = useState<"create" | "join" | null>(null);
+  const [busy, setBusy] = useState<"solo" | "friends" | "join" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const create = async () => {
-    setBusy("create");
+  // Deux intentions distinctes : la partie solo demarre aussitot, la table
+  // entre amis attend au salon le temps de partager son code.
+  const create = async (solo: boolean) => {
+    setBusy(solo ? "solo" : "friends");
     setError(null);
     try {
-      const table = await api<TableResponse>("/api/tables", { method: "POST" });
+      const table = await api<TableResponse>(`/api/tables?solo=${solo}`, {
+        method: "POST",
+      });
       router.push(`/table/${table.join_code}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Création impossible");
@@ -84,16 +88,35 @@ function Lobby() {
     <div className="flex flex-col gap-4">
       <button
         type="button"
-        className="btn btn-gold w-full"
-        onClick={create}
+        className="btn btn-gold w-full flex-col !items-start gap-0 py-3 !min-h-0"
+        onClick={() => create(true)}
         disabled={busy !== null}
       >
-        {busy === "create" ? "Création…" : "Créer une table"}
+        <span className="text-base">
+          {busy === "solo" ? "Distribution…" : "Jouer seul"}
+        </span>
+        <span className="text-xs font-normal opacity-75">
+          Contre trois bots, la partie commence tout de suite
+        </span>
+      </button>
+
+      <button
+        type="button"
+        className="btn btn-ghost w-full flex-col !items-start gap-0 py-3 !min-h-0"
+        onClick={() => create(false)}
+        disabled={busy !== null}
+      >
+        <span className="text-base">
+          {busy === "friends" ? "Ouverture…" : "Créer une table avec des amis"}
+        </span>
+        <span className="text-xs font-normal text-bone-dim">
+          Vous obtenez un code à partager, et lancez quand tout le monde est là
+        </span>
       </button>
 
       <div className="flex items-center gap-3 text-xs text-bone-dim">
         <span className="h-px flex-1 bg-bone/15" />
-        ou rejoindre
+        ou rejoindre une table
         <span className="h-px flex-1 bg-bone/15" />
       </div>
 
@@ -116,8 +139,8 @@ function Lobby() {
       {error && <p className="text-center text-sm text-ruby">{error}</p>}
 
       <p className="text-center text-xs text-bone-dim">
-        Les sièges vides sont tenus par des bots : vous pouvez jouer même à un
-        seul joueur.
+        À une table entre amis, les sièges restés libres sont tenus par des
+        bots : pas besoin d&apos;être quatre.
       </p>
     </div>
   );

@@ -41,6 +41,8 @@ interface GameState {
   winner: number | null;
   ready: Seat[];
   awaitingContinue: boolean;
+  inLobby: boolean;
+  canStart: boolean;
   /** Le pli qui vient d'etre ramasse, encore affiche. */
   heldTrick: HeldTrick | null;
   flashes: Flash[];
@@ -50,6 +52,7 @@ interface GameState {
   disconnect: () => void;
   act: (action: Action) => void;
   sendReady: () => void;
+  sendStart: () => void;
   dismissError: () => void;
 }
 
@@ -71,6 +74,8 @@ export const useGame = create<GameState>((set, get) => ({
   winner: null,
   ready: [],
   awaitingContinue: false,
+  inLobby: true,
+  canStart: false,
   heldTrick: null,
   flashes: [],
   error: null,
@@ -108,6 +113,8 @@ export const useGame = create<GameState>((set, get) => ({
 
   sendReady: () => get().socket?.send({ type: "ready" }),
 
+  sendStart: () => get().socket?.send({ type: "start" }),
+
   dismissError: () => set({ error: null }),
 }));
 
@@ -130,6 +137,9 @@ function applyMessage(msg: ServerMsg, set: Setter, get: Getter) {
         winner: msg.winner,
         ready: msg.ready,
         awaitingContinue: msg.awaiting_continue,
+        inLobby: msg.in_lobby,
+        canStart: msg.can_start,
+        joinCode: msg.join_code,
       });
       // Un pli est reparti : le precedent n'a plus lieu d'etre affiche.
       if (msg.view.trick.length > 0) {

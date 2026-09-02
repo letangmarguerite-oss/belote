@@ -4,10 +4,10 @@
 //! siege 0 et les trois autres sont tenus par des bots ; un ami qui rejoint
 //! remplace un bot.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::Json;
 use rand::Rng;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::auth::AuthUser;
@@ -54,9 +54,18 @@ struct SeatRow {
 
 // ---------------------------------------------------------------------------
 
+#[derive(Deserialize)]
+pub struct CreateParams {
+    /// Vrai pour une partie solo contre des bots, qui demarre aussitot.
+    /// Faux pour une table entre amis, qui attend d'etre lancee.
+    #[serde(default)]
+    pub solo: bool,
+}
+
 pub async fn create(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
+    Query(params): Query<CreateParams>,
 ) -> ApiResult<Json<TableResponse>> {
     let table_id = Uuid::now_v7();
 
@@ -65,13 +74,14 @@ pub async fn create(
     for attempt in 0..8 {
         let candidate = generate_join_code();
         let inserted = sqlx::query(
-            "insert into game_tables (id, join_code, owner_id)
-             values ($1, $2, $3)
+            "insert into game_tables (id, join_code, owner_id, autostart)
+             values ($1, $2, $3, $4)
              on conflict (join_code) do nothing",
         )
         .bind(table_id)
         .bind(&candidate)
         .bind(user_id)
+        .bind(params.solo)
         .execute(&state.pool)
         .await?;
 

@@ -104,6 +104,11 @@ export type ServerMsg =
       ready: Seat[];
       /** Vrai si la table attend l'accord des joueurs pour continuer. */
       awaiting_continue: boolean;
+      /** Vrai tant que la partie n'a pas commencé : salon d'attente. */
+      in_lobby: boolean;
+      /** Vrai si ce joueur peut lancer la partie (il a créé la table). */
+      can_start: boolean;
+      join_code: string;
     }
   | { type: "event"; seq: number; event: PublicEvent }
   | { type: "seats"; seats: SeatInfo[] }
@@ -119,6 +124,7 @@ export type Action =
 export type ClientMsg =
   | { type: "act"; action: Action }
   | { type: "ready" }
+  | { type: "start" }
   | { type: "resync" }
   | { type: "ping" };
 

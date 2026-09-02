@@ -17,6 +17,8 @@ pub enum ClientMsg {
     /// « Je veux la donne suivante. » Rien ne repart tant que les joueurs
     /// presents ne l'ont pas demande.
     Ready,
+    /// Le proprietaire lance la table depuis le salon d'attente.
+    Start,
     /// Redemande l'etat complet, apres une coupure reseau par exemple.
     Resync,
     Ping,
@@ -47,6 +49,12 @@ pub enum ServerMsg {
         ready: Vec<Seat>,
         /// Vrai si la table attend l'accord des joueurs pour continuer.
         awaiting_continue: bool,
+        /// Vrai tant que la partie n'a pas commence : salon d'attente.
+        in_lobby: bool,
+        /// Vrai si ce joueur peut lancer la partie (il a cree la table).
+        can_start: bool,
+        /// Le code a partager, affiche en grand dans le salon.
+        join_code: String,
     },
     /// Ce qui vient de se passer, deja projete pour ce destinataire.
     Event { seq: u32, event: PublicEvent },
