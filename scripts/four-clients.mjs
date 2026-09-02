@@ -150,6 +150,8 @@ class Client {
       this.target = msg.target;
     } else if (msg.type === "snapshot") {
       this.snapshots++;
+      this.awaiting = msg.awaiting_continue;
+      this.readySeats = msg.ready;
       // La donne avance vite : on garde le tout premier etat vu, sinon les
       // verifications sur la distribution initiale arrivent trop tard.
       if (!this.firstView) this.firstView = msg.view;
@@ -335,6 +337,39 @@ async function main() {
     "aucune carte posee deux fois",
     new Set(played.map((e) => cardKey(e.card))).size === 32,
   );
+
+  // --- Fin de donne ------------------------------------------------------
+  console.log("\nFin de donne");
+  await waitFor(() => clients.every((c) => c.awaiting === true), {
+    label: "l'attente d'une decision",
+  });
+  check("la table attend une decision des joueurs", true);
+
+  const dealsBefore = clients[0].events.filter((e) => e.type === "dealt").length;
+  await new Promise((r) => setTimeout(r, 4000));
+  check(
+    "rien ne repart tant que personne n'a accepte",
+    clients[0].events.filter((e) => e.type === "dealt").length === dealsBefore,
+  );
+
+  clients[0].send({ type: "ready" });
+  await new Promise((r) => setTimeout(r, 1200));
+  check(
+    "un seul accord ne suffit pas",
+    clients[0].events.filter((e) => e.type === "dealt").length === dealsBefore,
+  );
+  check(
+    "l'accord du joueur est visible des autres",
+    clients[1].readySeats?.includes(clients[0].seat) === true,
+    JSON.stringify(clients[1].readySeats),
+  );
+
+  for (const c of clients.slice(1)) c.send({ type: "ready" });
+  await waitFor(
+    () => clients[0].events.filter((e) => e.type === "dealt").length > dealsBefore,
+    { label: "la donne suivante" },
+  );
+  check("la donne suivante part quand tout le monde accepte", true);
 
   // --- Confidentialite ---------------------------------------------------
   console.log("\nConfidentialite");

@@ -14,6 +14,9 @@ use serde::{Deserialize, Serialize};
 pub enum ClientMsg {
     /// Une action de jeu : prendre, passer, choisir l'atout, poser une carte.
     Act { action: Action },
+    /// « Je veux la donne suivante. » Rien ne repart tant que les joueurs
+    /// presents ne l'ont pas demande.
+    Ready,
     /// Redemande l'etat complet, apres une coupure reseau par exemple.
     Resync,
     Ping,
@@ -40,6 +43,10 @@ pub enum ServerMsg {
         seats: Vec<SeatInfo>,
         /// Renseigne quand le match est fini.
         winner: Option<u8>,
+        /// Les sieges ayant demande la suite, entre deux donnes.
+        ready: Vec<Seat>,
+        /// Vrai si la table attend l'accord des joueurs pour continuer.
+        awaiting_continue: bool,
     },
     /// Ce qui vient de se passer, deja projete pour ce destinataire.
     Event { seq: u32, event: PublicEvent },

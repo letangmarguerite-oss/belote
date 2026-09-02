@@ -3,15 +3,18 @@
 import { CardBack, PlayingCard } from "./PlayingCard";
 import { SUIT_SYMBOL, isRed, positionOf, type Position } from "@/lib/cards";
 import type { PlayerView, Seat, SeatInfo } from "@/lib/types";
+import type { HeldTrick } from "@/store/game";
 
 interface Props {
   view: PlayerView;
   seats: SeatInfo[];
   mySeat: Seat;
+  /** Pli ramasse encore affiche, le temps qu'on le voie. */
+  heldTrick: HeldTrick | null;
 }
 
 /** Le tapis : les trois adversaires autour, le pli en cours au centre. */
-export function TableFelt({ view, seats, mySeat }: Props) {
+export function TableFelt({ view, seats, mySeat, heldTrick }: Props) {
   const byPosition = (position: Position) =>
     ([0, 1, 2, 3] as Seat[]).find((s) => positionOf(s, mySeat) === position)!;
 
@@ -26,7 +29,7 @@ export function TableFelt({ view, seats, mySeat }: Props) {
           <Opponent seat={byPosition("west")} view={view} seats={seats} layout="column" />
         </div>
 
-        <Trick view={view} mySeat={mySeat} />
+        <Trick view={view} mySeat={mySeat} heldTrick={heldTrick} />
 
         <div className="flex items-center justify-end">
           <Opponent seat={byPosition("east")} view={view} seats={seats} layout="column" />
@@ -109,7 +112,15 @@ function Opponent({
 }
 
 /** Le pli en cours, chaque carte placee du cote de qui l'a posee. */
-function Trick({ view, mySeat }: { view: PlayerView; mySeat: Seat }) {
+function Trick({
+  view,
+  mySeat,
+  heldTrick,
+}: {
+  view: PlayerView;
+  mySeat: Seat;
+  heldTrick: HeldTrick | null;
+}) {
   const slot: Record<Position, string> = {
     south: "bottom-0 left-1/2 -translate-x-1/2",
     west: "left-0 top-1/2 -translate-y-1/2",
@@ -117,28 +128,46 @@ function Trick({ view, mySeat }: { view: PlayerView; mySeat: Seat }) {
     east: "right-0 top-1/2 -translate-y-1/2",
   };
 
+  // Le pli ramasse prend le pas sur le tapis vide renvoye par le serveur.
+  const cards = heldTrick ? heldTrick.cards : view.trick;
+  const showUpcard =
+    cards.length === 0 && view.upcard && view.phase !== "playing";
+
   return (
     <div className="relative flex min-h-40 items-center justify-center sm:min-h-56">
       <div className="pointer-events-none absolute inset-3 rounded-[45%] border border-gold/15" />
 
-      {view.trick.length === 0 && view.upcard && view.phase !== "playing" && (
+      {showUpcard && view.upcard && (
         <div className="flex flex-col items-center gap-1">
           <div className="w-16 sm:w-20" style={{ aspectRatio: "100 / 150" }}>
             <PlayingCard card={view.upcard} />
           </div>
-          <span className="text-[0.7rem] text-bone-dim">carte retournee</span>
+          <span className="text-[0.7rem] text-bone-dim">carte retournée</span>
         </div>
       )}
 
-      {view.trick.map((played) => (
-        <div
-          key={`${played.seat}`}
-          className={`animate-deal absolute w-14 sm:w-16 ${slot[positionOf(played.seat, mySeat)]}`}
-          style={{ aspectRatio: "100 / 150" }}
-        >
-          <PlayingCard card={played.card} />
-        </div>
-      ))}
+      {cards.map((played) => {
+        const wins = heldTrick?.winner === played.seat;
+        return (
+          <div
+            key={played.seat}
+            className={`animate-deal absolute w-14 transition-transform duration-300 sm:w-16 ${slot[positionOf(played.seat, mySeat)]}`}
+            style={{
+              aspectRatio: "100 / 150",
+              // La carte gagnante se detache pendant que le pli est ramasse.
+              transform: wins ? "scale(1.12)" : undefined,
+              filter: wins
+                ? "drop-shadow(0 0 10px var(--color-gold))"
+                : heldTrick
+                  ? "brightness(0.72)"
+                  : undefined,
+              zIndex: wins ? 10 : 1,
+            }}
+          >
+            <PlayingCard card={played.card} />
+          </div>
+        );
+      })}
     </div>
   );
 }

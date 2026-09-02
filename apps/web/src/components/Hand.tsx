@@ -3,7 +3,15 @@
 import { useState } from "react";
 
 import { PlayingCard } from "./PlayingCard";
-import { cardKey, hasCard, sameCard, sortHand } from "@/lib/cards";
+import {
+  RANK_LABEL,
+  SUIT_SYMBOL,
+  cardKey,
+  hasCard,
+  isRed,
+  sameCard,
+  sortHand,
+} from "@/lib/cards";
 import type { Card, Suit } from "@/lib/types";
 
 interface Props {
@@ -56,16 +64,22 @@ export function Hand({ hand, legal, myTurn, trump, onPlay }: Props) {
               onClick={() => tap(card, playable)}
               disabled={!playable}
               aria-pressed={isSelected}
-              className="animate-deal relative shrink-0 rounded-lg transition-transform duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+              className="animate-deal relative shrink-0 transition-all duration-150 focus:outline-none"
               style={{
                 width: "clamp(2.9rem, 13vw, 5rem)",
                 aspectRatio: "100 / 150",
                 marginLeft: index === 0 ? 0 : "clamp(-1.5rem, -5vw, -0.6rem)",
                 zIndex: isSelected ? 50 : index,
-                transform: isSelected ? "translateY(-1.35rem)" : undefined,
-                filter: isSelected
-                  ? "drop-shadow(0 10px 14px rgba(0,0,0,0.55))"
-                  : "drop-shadow(0 3px 5px rgba(0,0,0,0.4))",
+                // La carte choisie sort franchement du rang : elle monte, elle
+                // grandit, et un liseré doré l'entoure. Sur telephone les
+                // cartes se chevauchent, un simple decalage ne suffit pas.
+                transform: isSelected
+                  ? "translateY(-2rem) scale(1.1)"
+                  : undefined,
+                borderRadius: "0.55rem",
+                boxShadow: isSelected
+                  ? "0 0 0 3px var(--color-gold), 0 14px 20px rgba(0,0,0,0.6)"
+                  : "0 3px 5px rgba(0,0,0,0.4)",
                 cursor: playable ? "pointer" : "default",
               }}
             >
@@ -75,20 +89,40 @@ export function Hand({ hand, legal, myTurn, trump, onPlay }: Props) {
         })}
       </div>
 
-      <div className="mt-3 flex h-11 items-center justify-center">
+      <div className="mt-4 flex h-11 items-center justify-center gap-2">
         {selected ? (
-          <button
-            type="button"
-            className="btn btn-gold"
-            onClick={() => {
-              onPlay(selected);
-              setSelectedKey(null);
-            }}
-          >
-            Jouer cette carte
-          </button>
+          <>
+            <button
+              type="button"
+              className="btn btn-gold"
+              onClick={() => {
+                onPlay(selected);
+                setSelectedKey(null);
+              }}
+            >
+              Jouer {RANK_LABEL[selected.rank]}
+              <span
+                style={{
+                  color: isRed(selected.suit)
+                    ? "var(--color-ruby)"
+                    : "var(--color-ink-950)",
+                }}
+              >
+                {SUIT_SYMBOL[selected.suit]}
+              </span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setSelectedKey(null)}
+            >
+              Annuler
+            </button>
+          </>
         ) : myTurn ? (
-          <p className="text-sm text-gold">A vous de jouer</p>
+          <p className="text-sm text-gold">
+            À vous — touchez une carte pour la choisir
+          </p>
         ) : null}
       </div>
     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { BidPanel } from "@/components/BidPanel";
@@ -8,6 +8,7 @@ import { Hand } from "@/components/Hand";
 import { Scoreboard, TableFelt } from "@/components/TableFelt";
 import { Shell } from "@/components/Shell";
 import { SUIT_LABEL } from "@/lib/cards";
+import type { DealScore, Seat, SeatInfo } from "@/lib/types";
 import { useAuth } from "@/store/auth";
 import { useGame } from "@/store/game";
 
@@ -24,10 +25,12 @@ export default function TablePage() {
 }
 
 function Game({ code }: { code: string }) {
+  const router = useRouter();
   const {
     connect,
     disconnect,
     act,
+    sendReady,
     status,
     view,
     seats,
@@ -35,6 +38,9 @@ function Game({ code }: { code: string }) {
     totals,
     carry,
     winner,
+    ready,
+    awaitingContinue,
+    heldTrick,
     flashes,
     error,
     dismissError,
@@ -44,6 +50,11 @@ function Game({ code }: { code: string }) {
     connect(code);
     return () => disconnect();
   }, [code, connect, disconnect]);
+
+  const leave = () => {
+    disconnect();
+    router.push("/");
+  };
 
   if (!view || mySeat === null) {
     return (
@@ -56,7 +67,10 @@ function Game({ code }: { code: string }) {
     );
   }
 
-  const myTurn = view.turn === mySeat && view.phase === "playing";
+  // La main se verrouille pendant que le pli ramasse est encore affiche :
+  // sinon un joueur rapide effacerait de lui-meme ce qu'on lui montre.
+  const myTurn =
+    view.turn === mySeat && view.phase === "playing" && heldTrick === null;
   const waiting = seats.some((s) => !s.is_bot && !s.connected);
 
   return (
@@ -77,7 +91,12 @@ function Game({ code }: { code: string }) {
 
       <Scoreboard view={view} totals={totals} mySeat={mySeat} carry={carry} />
 
-      <TableFelt view={view} seats={seats} mySeat={mySeat} />
+      <TableFelt
+        view={view}
+        seats={seats}
+        mySeat={mySeat}
+        heldTrick={heldTrick}
+      />
 
       <div className="pointer-events-none flex flex-col items-center gap-1">
         {flashes.map((flash) => (
@@ -93,12 +112,16 @@ function Game({ code }: { code: string }) {
         </div>
       ) : null}
 
-      {view.phase === "finished" && view.score && (
+      {awaitingContinue && view.score && (
         <DealResult
           score={view.score}
           mySeat={mySeat}
           totals={totals}
           winner={winner}
+          seats={seats}
+          ready={ready}
+          onContinue={sendReady}
+          onLeave={leave}
         />
       )}
 
@@ -125,23 +148,42 @@ function Game({ code }: { code: string }) {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * Fin de donne. Rien ne repart tant que les joueurs presents n'ont pas
+ * demande la suite : on peut lire le decompte, ou quitter la table.
+ */
 function DealResult({
   score,
   mySeat,
   totals,
   winner,
+  seats,
+  ready,
+  onContinue,
+  onLeave,
 }: {
-  score: NonNullable<ReturnType<typeof useGame.getState>["view"]>["score"];
-  mySeat: number;
+  score: DealScore;
+  mySeat: Seat;
   totals: [number, number];
   winner: number | null;
+  seats: SeatInfo[];
+  ready: Seat[];
+  onContinue: () => void;
+  onLeave: () => void;
 }) {
-  if (!score) return null;
   const myTeam = mySeat % 2;
   const won = score.points[myTeam] > score.points[1 - myTeam];
+  const iAmReady = ready.includes(mySeat);
+
+  // Qui doit encore se prononcer : les joueurs presents, bots exclus.
+  const pending = seats.filter(
+    (s) => !s.is_bot && s.connected && !ready.includes(s.seat),
+  );
+
+  const matchOver = winner !== null;
 
   return (
-    <div className="panel mx-auto flex max-w-md flex-col items-center gap-1 p-4 text-center">
+    <div className="panel mx-auto flex w-full max-w-md flex-col items-center gap-2 p-4 text-center">
       <p className="font-display text-lg text-gold">
         {score.litige
           ? "Litige"
@@ -149,7 +191,7 @@ function DealResult({
             ? "Contrat rempli"
             : "Dedans"}
       </p>
-      <p className="text-sm text-bone-dim">
+      <p className="text-xs text-bone-dim">
         Atout {SUIT_LABEL[score.trump].toLowerCase()}
         {score.capot !== null && " · capot"}
         {score.belote !== null && " · belote"}
@@ -165,13 +207,41 @@ function DealResult({
           {score.carry_out} points en cagnotte pour la donne suivante
         </p>
       )}
-      {winner !== null ? (
-        <p className="mt-1 font-display text-lg text-gold">
+
+      {matchOver && (
+        <p className="font-display text-lg text-gold">
           {winner === myTeam ? "Vous gagnez le match !" : "Match perdu"} (
           {totals[myTeam]} — {totals[1 - myTeam]})
         </p>
-      ) : (
-        <p className="mt-1 text-xs text-bone-dim">Donne suivante dans un instant…</p>
+      )}
+
+      <div className="mt-1 flex w-full flex-col gap-2 sm:flex-row sm:justify-center">
+        <button
+          type="button"
+          className="btn btn-gold flex-1"
+          onClick={onContinue}
+          disabled={iAmReady}
+        >
+          {iAmReady
+            ? "En attente des autres…"
+            : matchOver
+              ? "Nouveau match"
+              : "Donne suivante"}
+        </button>
+        <button type="button" className="btn btn-ghost flex-1" onClick={onLeave}>
+          Quitter la table
+        </button>
+      </div>
+
+      {iAmReady && pending.length > 0 && (
+        <p className="text-xs text-bone-dim">
+          On attend {pending.map((s) => s.display_name).join(", ")}
+        </p>
+      )}
+      {!matchOver && (
+        <p className="text-[0.7rem] text-bone-dim">
+          Sans réponse, la donne suivante démarre au bout d&apos;une minute.
+        </p>
       )}
     </div>
   );

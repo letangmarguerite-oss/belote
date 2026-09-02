@@ -125,6 +125,11 @@ async fn serve(socket: WebSocket, cmd_tx: mpsc::Sender<Cmd>, user_id: Uuid) {
                             break;
                         }
                     }
+                    Ok(ClientMsg::Ready) => {
+                        if reader_cmd.send(Cmd::Ready { user_id }).await.is_err() {
+                            break;
+                        }
+                    }
                     Ok(ClientMsg::Resync) => {
                         if reader_cmd.send(Cmd::Resync { conn_id }).await.is_err() {
                             break;

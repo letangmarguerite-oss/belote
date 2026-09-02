@@ -5,7 +5,7 @@
 //! commandes sont serialisees par le canal, et les courses disparaissent par
 //! construction plutot que par discipline.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -31,9 +31,13 @@ pub const TARGET_POINTS: u16 = 1000;
 const BOT_THINK: Duration = Duration::from_millis(900);
 /// Au-dela, un bot joue a la place du joueur absent.
 const TURN_TIMEOUT: Duration = Duration::from_secs(45);
-/// Pause entre deux donnes, pour laisser lire le decompte.
-const NEXT_DEAL_PAUSE: Duration = Duration::from_secs(5);
+/// Delai avant d'enchainer seul sur la donne suivante, si personne ne se
+/// prononce. Assez long pour lire le decompte et decider de s'arreter.
+const AUTO_CONTINUE: Duration = Duration::from_secs(45);
 const REDEAL_PAUSE: Duration = Duration::from_secs(2);
+/// Le pli ramasse reste visible : sinon la quatrieme carte disparait avant
+/// meme d'avoir ete vue.
+const TRICK_PAUSE: Duration = Duration::from_millis(1600);
 const TICK: Duration = Duration::from_millis(200);
 /// Une table sans personne finit par liberer sa tache.
 const IDLE_SHUTDOWN: Duration = Duration::from_secs(600);
@@ -57,6 +61,9 @@ pub enum Cmd {
     Act {
         user_id: Uuid,
         action: Action,
+    },
+    Ready {
+        user_id: Uuid,
     },
     Resync {
         conn_id: u64,
@@ -110,6 +117,8 @@ pub struct TableActor {
     winner: Option<u8>,
     /// La donne courante a-t-elle deja ete comptabilisee au score du match ?
     settled: bool,
+    /// Sieges ayant demande la donne suivante, entre deux donnes.
+    ready: HashSet<Seat>,
     rng: ChaCha8Rng,
     /// Quand le siege courant doit agir automatiquement.
     act_at: Option<Instant>,
@@ -142,6 +151,7 @@ impl TableActor {
             dealer: Seat(0),
             winner: None,
             settled: true,
+            ready: HashSet::new(),
             rng: ChaCha8Rng::from_entropy(),
             act_at: None,
             empty_since: Some(Instant::now()),
@@ -234,6 +244,23 @@ impl TableActor {
                 self.do_action(seat, action).await;
             }
 
+            Cmd::Ready { user_id } => {
+                let Some(seat) = self.seat_of(user_id) else {
+                    return;
+                };
+                if self.state.phase != Phase::Finished {
+                    return;
+                }
+                self.ready.insert(seat);
+                // On repart des que tous les joueurs presents l'ont demande ;
+                // les bots ne votent pas, et un absent ne bloque personne.
+                if self.everyone_ready() {
+                    self.proceed().await;
+                } else {
+                    self.broadcast_snapshot();
+                }
+            }
+
             Cmd::Resync { conn_id } => {
                 if let Some(conn) = self.conns.iter().find(|c| c.conn_id == conn_id) {
                     let msg = self.snapshot_for(conn.seat);
@@ -272,13 +299,9 @@ impl TableActor {
         }
 
         match self.state.phase {
-            Phase::Finished => {
-                if self.winner.is_none() {
-                    self.deal().await;
-                } else {
-                    self.act_at = None;
-                }
-            }
+            // Personne ne s'est prononce : on enchaine seul, pour ne pas
+            // laisser une table en plan si quelqu'un s'est eclipse.
+            Phase::Finished => self.proceed().await,
             Phase::Redeal => self.deal().await,
             Phase::Bidding1 | Phase::Bidding2 | Phase::Playing => {
                 // Soit c'est un bot, soit le joueur a laisse filer son temps.
@@ -345,9 +368,21 @@ impl TableActor {
         Ok(())
     }
 
+    /// Reprend apres une donne terminee : donne suivante, ou nouveau match si
+    /// le precedent est alle a son terme.
+    async fn proceed(&mut self) {
+        self.ready.clear();
+        if self.winner.is_some() {
+            self.start_match().await;
+        } else {
+            self.deal().await;
+        }
+    }
+
     /// Distribue une nouvelle donne.
     async fn deal(&mut self) {
         self.settled = false;
+        self.ready.clear();
         let ev = start_deal(self.dealer, self.carry, &mut self.rng);
         reduce(&mut self.state, &ev);
         self.emit(&ev);
@@ -403,18 +438,25 @@ impl TableActor {
         self.act_at = match self.state.phase {
             Phase::Bidding1 | Phase::Bidding2 | Phase::Playing => {
                 let seat = self.state.turn;
-                let delay = if self.is_auto(seat) {
+                let mut delay = if self.is_auto(seat) {
                     BOT_THINK
                 } else {
                     TURN_TIMEOUT
                 };
+                // Un pli vient d'etre ramasse : on laisse le temps de le voir
+                // avant que la carte suivante ne tombe.
+                if self.state.trick.is_empty() && self.state.tricks_played > 0 {
+                    delay += TRICK_PAUSE;
+                }
                 Some(Instant::now() + delay)
             }
             Phase::Finished => {
+                // Match gagne : on attend une decision explicite, on ne relance
+                // jamais tout seul.
                 if self.winner.is_some() {
                     None
                 } else {
-                    Some(Instant::now() + NEXT_DEAL_PAUSE)
+                    Some(Instant::now() + AUTO_CONTINUE)
                 }
             }
             Phase::Redeal => Some(Instant::now() + REDEAL_PAUSE),
@@ -461,6 +503,8 @@ impl TableActor {
             carry: self.carry,
             seats: self.seat_infos(),
             winner: self.winner,
+            ready: self.ready.iter().copied().collect(),
+            awaiting_continue: self.state.phase == Phase::Finished,
         }
     }
 
@@ -510,6 +554,16 @@ impl TableActor {
         Seat::ALL
             .into_iter()
             .all(|seat| self.occupants[seat.index()].is_bot || self.is_connected(seat))
+    }
+
+    /// Tous les joueurs presents ont demande la suite. Les bots ne votent pas,
+    /// et un joueur deconnecte ne bloque pas la table.
+    fn everyone_ready(&self) -> bool {
+        let present: Vec<Seat> = Seat::ALL
+            .into_iter()
+            .filter(|seat| !self.occupants[seat.index()].is_bot && self.is_connected(*seat))
+            .collect();
+        !present.is_empty() && present.iter().all(|seat| self.ready.contains(seat))
     }
 
     /// Un siege joue tout seul s'il est tenu par un bot, ou si son occupant a

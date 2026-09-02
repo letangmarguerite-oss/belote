@@ -5,7 +5,7 @@ import { create } from "zustand";
 import { GameSocket, type SocketStatus } from "@/lib/ws";
 import type {
   Action,
-  Card,
+  PlayedCard,
   PlayerView,
   PublicEvent,
   Seat,
@@ -19,6 +19,15 @@ export interface Flash {
   text: string;
 }
 
+/** Un pli ramasse, garde a l'ecran le temps qu'on le voie. */
+export interface HeldTrick {
+  cards: PlayedCard[];
+  winner: Seat;
+}
+
+/** Duree d'affichage du pli ramasse. Le serveur observe la meme pause. */
+const TRICK_HOLD_MS = 1600;
+
 interface GameState {
   socket: GameSocket | null;
   status: SocketStatus;
@@ -30,18 +39,24 @@ interface GameState {
   totals: [number, number];
   carry: number;
   winner: number | null;
-  /** Derniere carte posee, pour l'animation. */
-  lastPlayed: Card | null;
+  ready: Seat[];
+  awaitingContinue: boolean;
+  /** Le pli qui vient d'etre ramasse, encore affiche. */
+  heldTrick: HeldTrick | null;
   flashes: Flash[];
   error: string | null;
 
   connect: (code: string) => void;
   disconnect: () => void;
   act: (action: Action) => void;
+  sendReady: () => void;
   dismissError: () => void;
 }
 
 let flashId = 0;
+/** Cartes du pli en cours, reconstituees au fil des evenements. */
+let running: PlayedCard[] = [];
+let holdTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useGame = create<GameState>((set, get) => ({
   socket: null,
@@ -54,24 +69,30 @@ export const useGame = create<GameState>((set, get) => ({
   totals: [0, 0],
   carry: 0,
   winner: null,
-  lastPlayed: null,
+  ready: [],
+  awaitingContinue: false,
+  heldTrick: null,
   flashes: [],
   error: null,
 
   connect: (code) => {
     get().socket?.close();
+    running = [];
+    if (holdTimer) clearTimeout(holdTimer);
 
     const socket = new GameSocket(code, {
       onStatus: (status) => set({ status }),
       onMessage: (msg) => applyMessage(msg, set, get),
     });
 
-    set({ socket, joinCode: code, error: null });
+    set({ socket, joinCode: code, error: null, heldTrick: null });
     void socket.connect();
   },
 
   disconnect: () => {
     get().socket?.close();
+    if (holdTimer) clearTimeout(holdTimer);
+    running = [];
     set({
       socket: null,
       status: "closed",
@@ -79,10 +100,13 @@ export const useGame = create<GameState>((set, get) => ({
       mySeat: null,
       seats: [],
       flashes: [],
+      heldTrick: null,
     });
   },
 
   act: (action) => get().socket?.send({ type: "act", action }),
+
+  sendReady: () => get().socket?.send({ type: "ready" }),
 
   dismissError: () => set({ error: null }),
 }));
@@ -97,14 +121,21 @@ function applyMessage(msg: ServerMsg, set: Setter, get: Getter) {
       break;
 
     case "snapshot":
-      // L'instantane fait autorite : on ne "fusionne" rien, on remplace.
+      // L'instantane fait autorite : on ne fusionne rien, on remplace.
       set({
         view: msg.view,
         totals: msg.totals,
         carry: msg.carry,
         seats: msg.seats,
         winner: msg.winner,
+        ready: msg.ready,
+        awaitingContinue: msg.awaiting_continue,
       });
+      // Un pli est reparti : le precedent n'a plus lieu d'etre affiche.
+      if (msg.view.trick.length > 0) {
+        running = msg.view.trick;
+        clearHold(set);
+      }
       break;
 
     case "seats":
@@ -124,7 +155,15 @@ function applyMessage(msg: ServerMsg, set: Setter, get: Getter) {
   }
 }
 
-/** Les evenements ne servent qu'a l'agrement : animations et annonces. */
+function clearHold(set: Setter) {
+  if (holdTimer) {
+    clearTimeout(holdTimer);
+    holdTimer = null;
+  }
+  set({ heldTrick: null });
+}
+
+/** Les evenements servent aux annonces et a l'affichage du pli ramasse. */
 function handleEvent(event: PublicEvent, set: Setter, get: Getter) {
   const names = get().seats;
   const nameOf = (seat: Seat) =>
@@ -141,25 +180,55 @@ function handleEvent(event: PublicEvent, set: Setter, get: Getter) {
 
   switch (event.type) {
     case "played":
-      set({ lastPlayed: event.card });
+      // Une nouvelle carte tombe : le pli precedent laisse la place.
+      if (get().heldTrick) {
+        running = [];
+        clearHold(set);
+      }
+      running = [...running, { seat: event.seat, card: event.card }];
       break;
+
+    case "trick_taken": {
+      // Le serveur vide le pli aussitot ramasse. On le garde a l'ecran, sans
+      // quoi la quatrieme carte disparaitrait avant d'avoir ete vue — et la
+      // derniere du tout n'apparaitrait jamais.
+      const cards = running;
+      running = [];
+      if (cards.length > 0) {
+        if (holdTimer) clearTimeout(holdTimer);
+        set({ heldTrick: { cards, winner: event.winner } });
+        holdTimer = setTimeout(() => {
+          holdTimer = null;
+          set({ heldTrick: null });
+        }, TRICK_HOLD_MS);
+      }
+      if (event.last) flash("Dix de der");
+      break;
+    }
+
+    case "dealt":
+      running = [];
+      clearHold(set);
+      break;
+
     case "passed":
       flash(`${nameOf(event.seat)} passe`);
       break;
+
     case "took":
       flash(`${nameOf(event.seat)} prend`);
       break;
+
     case "belote_shown":
       flash(
         `${nameOf(event.seat)} : ${event.complete ? "rebelote" : "belote"} !`,
       );
       break;
+
     case "redeal":
       flash("Personne ne prend, on redistribue");
       break;
-    case "trick_taken":
-      if (event.last) flash("Dix de der");
-      break;
+
     default:
       break;
   }

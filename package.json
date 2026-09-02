@@ -5,6 +5,11 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace=web"
+    "dev": "npm run dev --workspace=web",
+    "dev:web": "npm run dev --workspace=web",
+    "dev:api": "cargo run -p belote-server",
+    "build": "npm run build --workspace=web",
+    "check:api": "node scripts/api-check.mjs",
+    "check:game": "node scripts/four-clients.mjs"
   }
 }

@@ -4,7 +4,7 @@
 // Il transporte des actions et recoit des instantanes. Toute la logique de jeu
 // vit cote serveur.
 
-import { API_URL, WS_URL, getAccessToken } from "./api";
+import { api, wsUrl } from "./api";
 import type { ClientMsg, ServerMsg } from "./types";
 
 export type SocketStatus = "connecting" | "open" | "reconnecting" | "closed";
@@ -40,21 +40,16 @@ export class GameSocket {
     let ticket: string;
     try {
       // Un ticket ne sert qu'une fois : il en faut un neuf a chaque connexion.
-      const res = await fetch(`${API_URL}/api/ws-ticket`, {
+      const res = await api<{ ticket: string }>("/api/ws-ticket", {
         method: "POST",
-        credentials: "include",
-        headers: getAccessToken()
-          ? { authorization: `Bearer ${getAccessToken()}` }
-          : {},
       });
-      if (!res.ok) throw new Error(`ticket refuse (${res.status})`);
-      ticket = ((await res.json()) as { ticket: string }).ticket;
+      ticket = res.ticket;
     } catch {
       this.scheduleRetry();
       return;
     }
 
-    const url = `${WS_URL}/ws?ticket=${encodeURIComponent(ticket)}&code=${encodeURIComponent(this.code)}`;
+    const url = `${wsUrl()}/ws?ticket=${encodeURIComponent(ticket)}&code=${encodeURIComponent(this.code)}`;
     const ws = new WebSocket(url);
     this.ws = ws;
 

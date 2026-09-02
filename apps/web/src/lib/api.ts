@@ -6,10 +6,31 @@
 
 import type { AuthResponse } from "./types";
 
-export const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+/**
+ * Vide par defaut : les appels partent en relatif vers le serveur Next, qui
+ * relaie vers le back (voir next.config.ts). C'est ce qui rend l'application
+ * utilisable depuis un telephone sans configurer d'adresse IP.
+ *
+ * En production, on peut pointer directement une API sur un autre domaine.
+ */
+export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
-export const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8080";
+/** Au-dela, on considere le serveur injoignable plutot que d'attendre sans fin. */
+const REQUEST_TIMEOUT = 10_000;
+
+/**
+ * Adresse du WebSocket. Il ne passe pas par le relais Next (qui ne sait pas
+ * relayer une connexion persistante) : on le construit depuis l'hote de la
+ * page, donc il suit automatiquement localhost, l'IP locale ou le domaine.
+ */
+export function wsUrl(): string {
+  const configured = process.env.NEXT_PUBLIC_WS_URL;
+  if (configured) return configured;
+
+  const port = process.env.NEXT_PUBLIC_WS_PORT ?? "8080";
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.hostname}:${port}`;
+}
 
 let accessToken: string | null = null;
 
@@ -49,6 +70,7 @@ export async function api<T>(path: string, options: Options = {}): Promise<T> {
     // Indispensable : c'est ce qui transporte le cookie de rafraichissement.
     credentials: "include",
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT),
   });
 
   // Jeton expire : on le renouvelle une fois, puis on rejoue la requete.
@@ -81,6 +103,8 @@ export async function refresh(): Promise<AuthResponse | null> {
     setAccessToken(auth.access_token);
     return auth;
   } catch {
+    // Session absente, expiree, ou serveur injoignable : dans tous les cas on
+    // repart sur un ecran de connexion plutot que de rester bloque.
     setAccessToken(null);
     return null;
   }

@@ -100,6 +100,10 @@ export type ServerMsg =
       carry: number;
       seats: SeatInfo[];
       winner: number | null;
+      /** Sieges ayant demande la donne suivante. */
+      ready: Seat[];
+      /** Vrai si la table attend l'accord des joueurs pour continuer. */
+      awaiting_continue: boolean;
     }
   | { type: "event"; seq: number; event: PublicEvent }
   | { type: "seats"; seats: SeatInfo[] }
@@ -114,6 +118,7 @@ export type Action =
 
 export type ClientMsg =
   | { type: "act"; action: Action }
+  | { type: "ready" }
   | { type: "resync" }
   | { type: "ping" };
 
