@@ -1,0 +1,10 @@
+# Ce qui n'a rien a faire dans l'image, et qui la ralentirait beaucoup.
+target/
+node_modules/
+apps/
+.next/
+.git/
+.env
+.env.*
+scripts/
+*.md

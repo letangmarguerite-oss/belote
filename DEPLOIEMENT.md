@@ -35,21 +35,26 @@ Comme le navigateur ne parle qu'à Vercel en HTTP, **le cookie de session reste 
 ## 1. Le serveur de jeu, sur Render
 
 Les *Blueprints* (création automatique depuis [render.yaml](render.yaml)) sont
-réservés aux comptes payants. On crée donc le service à la main : c'est le même
-résultat, le fichier ne fait que pré-remplir ce formulaire.
+réservés aux comptes payants. On crée donc le service à la main.
+
+> **Choisir Docker, pas Rust.** Le dépôt contient un `package.json` à la racine,
+> pour l'espace de travail npm. Les hébergeurs qui devinent le langage y voient
+> un projet Node, et la compilation échoue sur `cargo: command not found`. Le
+> [Dockerfile](Dockerfile) lève l'ambiguïté et fixe la version de Rust.
 
 **New** → **Web Service** → connecter le dépôt `belote`.
 
 | Champ | Valeur |
 |---|---|
 | Name | `belote-api` |
-| Language | **Rust** |
+| Language | **Docker** |
 | Branch | `main` |
-| Root Directory | *laisser vide* — le serveur est à la racine du workspace Cargo |
-| Build Command | `cargo build --release -p belote-server` |
-| Start Command | `./target/release/belote-server` |
+| Root Directory | *laisser vide* |
+| Dockerfile Path | `./Dockerfile` |
 | Region | Frankfurt — là où se trouve déjà la base |
 | Health Check Path | `/health` *(section Advanced)* |
+
+Il n'y a ni build command ni start command à renseigner : le Dockerfile les porte.
 
 Puis quatre variables d'environnement :
 
