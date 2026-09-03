@@ -34,18 +34,36 @@ Comme le navigateur ne parle qu'à Vercel en HTTP, **le cookie de session reste 
 
 ## 1. Le serveur de jeu, sur Render
 
-1. Sur [render.com](https://render.com) → **New** → **Blueprint**, choisir le dépôt.
-   Render lit [render.yaml](render.yaml) et propose le service `belote-api`.
-2. Renseigner les deux variables laissées vides :
-   - `DATABASE_URL` — la chaîne Neon, **sans** `&channel_binding=require` (la
-     bibliothèque Rust ne connaît pas ce paramètre) :
-     ```
-     postgresql://…@….neon.tech/belote?sslmode=require
-     ```
-   - `ALLOWED_ORIGIN` — l'adresse Vercel, connue seulement après l'étape 2.
-     Mettre `https://exemple.vercel.app` pour l'instant, on corrigera.
-3. Déployer. La première compilation Rust prend 5 à 10 minutes.
-4. Vérifier : `https://belote-api.onrender.com/health` doit répondre `ok`.
+Les *Blueprints* (création automatique depuis [render.yaml](render.yaml)) sont
+réservés aux comptes payants. On crée donc le service à la main : c'est le même
+résultat, le fichier ne fait que pré-remplir ce formulaire.
+
+**New** → **Web Service** → connecter le dépôt `belote`.
+
+| Champ | Valeur |
+|---|---|
+| Name | `belote-api` |
+| Language | **Rust** |
+| Branch | `main` |
+| Root Directory | *laisser vide* — le serveur est à la racine du workspace Cargo |
+| Build Command | `cargo build --release -p belote-server` |
+| Start Command | `./target/release/belote-server` |
+| Region | Frankfurt — là où se trouve déjà la base |
+| Health Check Path | `/health` *(section Advanced)* |
+
+Puis quatre variables d'environnement :
+
+| Nom | Valeur |
+|---|---|
+| `DATABASE_URL` | la chaîne Neon, **sans** `&channel_binding=require` — la bibliothèque Rust ne connaît pas ce paramètre. Garder `?sslmode=require`. |
+| `JWT_SECRET` | cliquer sur **Generate** : Render fabrique une valeur aléatoire, meilleure que tout ce qu'on choisirait à la main |
+| `SECURE_COOKIES` | `true` |
+| `ALLOWED_ORIGIN` | l'adresse Vercel, connue seulement après l'étape 2 — mettre `https://exemple.vercel.app` et corriger ensuite |
+
+Ne pas définir `PORT` : Render l'impose lui-même, et le serveur le lit.
+
+Déployer. La première compilation Rust prend 5 à 10 minutes.
+Vérifier ensuite que `https://belote-api.onrender.com/health` répond `ok`.
 
 Les migrations s'appliquent toutes seules au démarrage — rien à lancer à la main.
 
@@ -87,9 +105,15 @@ Idéalement à deux appareils sur deux réseaux différents, dont un en 4G.
 |---|---|---|
 | Vercel | Hobby | gratuit |
 | Neon | Free | gratuit |
-| Render | **Starter** | ~7 $/mois |
+| Render | Free, ou Starter | gratuit, ou ~7 $/mois |
 
-Le plan gratuit de Render endort le service après 15 minutes sans trafic : la partie en cours est coupée et le réveil prend une cinquantaine de secondes. Acceptable pour montrer le projet, pas pour y jouer.
+Le plan gratuit de Render endort le service après 15 minutes sans trafic. Concrètement :
+
+- la première personne à ouvrir le jeu attend une **cinquantaine de secondes**, le temps du réveil ;
+- une partie en cours au moment de l'endormissement est **perdue** — l'état des tables vit en mémoire. Le journal, lui, est en base : la partie apparaît simplement comme interrompue dans l'historique ;
+- une fois réveillé, il reste éveillé tant qu'on joue.
+
+C'est acceptable pour essayer et montrer le projet. Le passage au plan Starter s'impose le jour où vous jouez régulièrement à plusieurs.
 
 ## Points de vigilance
 

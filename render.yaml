@@ -1,7 +1,11 @@
 # Description du service pour Render (« Blueprint »).
 #
-# Render lit ce fichier a la racine du depot et cree le service tout seul. Il
-# n'y a pas de base ici : elle est deja hebergee chez Neon, on lui fournit
+# ATTENTION : les Blueprints sont reserves aux comptes payants. Sur un compte
+# gratuit, creer le service a la main (New > Web Service) en recopiant les
+# valeurs ci-dessous ; DEPLOIEMENT.md les reprend sous forme de tableau. Ce
+# fichier reste utile comme reference, et le jour ou le compte passe payant.
+#
+# Il n'y a pas de base ici : elle est deja hebergee chez Neon, on lui fournit
 # seulement sa chaine de connexion.
 #
 # Frankfurt est la region la plus proche de la France, et celle ou se trouve
@@ -12,10 +16,10 @@ services:
     name: belote-api
     runtime: rust
     region: frankfurt
-    # Le plan gratuit endort le service au bout de 15 minutes d'inactivite, ce
-    # qui coupe les parties en cours et impose un reveil de ~50 s. Pour un
-    # serveur qui tient des connexions ouvertes, prendre « starter ».
-    plan: starter
+    # « free » fonctionne, mais endort le service au bout de 15 minutes
+    # d'inactivite : reveil de ~50 s, et la partie en cours est perdue.
+    # « starter » (~7 $/mois) le garde eveille.
+    plan: free
     buildCommand: cargo build --release -p belote-server
     startCommand: ./target/release/belote-server
     healthCheckPath: /health
