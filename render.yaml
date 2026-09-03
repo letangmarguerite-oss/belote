@@ -1,0 +1,38 @@
+# Description du service pour Render (« Blueprint »).
+#
+# Render lit ce fichier a la racine du depot et cree le service tout seul. Il
+# n'y a pas de base ici : elle est deja hebergee chez Neon, on lui fournit
+# seulement sa chaine de connexion.
+#
+# Frankfurt est la region la plus proche de la France, et celle ou se trouve
+# deja la base : chaque requete SQL evite ainsi une traversee de l'Atlantique.
+
+services:
+  - type: web
+    name: belote-api
+    runtime: rust
+    region: frankfurt
+    # Le plan gratuit endort le service au bout de 15 minutes d'inactivite, ce
+    # qui coupe les parties en cours et impose un reveil de ~50 s. Pour un
+    # serveur qui tient des connexions ouvertes, prendre « starter ».
+    plan: starter
+    buildCommand: cargo build --release -p belote-server
+    startCommand: ./target/release/belote-server
+    healthCheckPath: /health
+    envVars:
+      # Render fabrique une valeur aleatoire a la creation et ne la montre
+      # jamais : c'est mieux qu'un secret choisi a la main.
+      - key: JWT_SECRET
+        generateValue: true
+      # Servi en https : le cookie de session doit etre marque Secure.
+      - key: SECURE_COOKIES
+        value: "true"
+      - key: RUST_LOG
+        value: belote_server=info,tower_http=warn,info
+      # A renseigner dans l'interface de Render, jamais dans ce fichier :
+      #   DATABASE_URL   la chaine de connexion Neon
+      #   ALLOWED_ORIGIN l'adresse du front sur Vercel
+      - key: DATABASE_URL
+        sync: false
+      - key: ALLOWED_ORIGIN
+        sync: false
