@@ -24,8 +24,13 @@ use uuid::Uuid;
 use crate::error::{ApiError, ApiResult};
 use crate::proto::{SeatInfo, ServerMsg};
 
-/// Score a atteindre pour gagner le match.
-pub const TARGET_POINTS: u16 = 1000;
+/// Objectif par defaut, quand la table n'en precise pas.
+pub const DEFAULT_TARGET: u16 = 1000;
+/// Nombre d'annonces toutes faites. Le serveur n'en connait que le rang.
+pub const PHRASE_COUNT: u8 = 6;
+/// Une annonce par siege et par seconde et demie : de quoi reagir, pas de
+/// quoi noyer la table.
+const SAY_COOLDOWN: Duration = Duration::from_millis(1500);
 
 /// Temps de reflexion feint d'un bot : un bot instantane rend la table illisible.
 const BOT_THINK: Duration = Duration::from_millis(900);
@@ -68,6 +73,10 @@ pub enum Cmd {
     /// Le proprietaire lance la partie depuis le salon d'attente.
     Start {
         user_id: Uuid,
+    },
+    Say {
+        user_id: Uuid,
+        phrase: u8,
     },
     Resync {
         conn_id: u64,
@@ -122,6 +131,10 @@ pub struct TableActor {
     owner_id: Uuid,
     /// Vrai pour une partie solo : elle demarre sans attendre.
     autostart: bool,
+    /// Points a atteindre pour gagner le match.
+    target: u16,
+    /// Derniere annonce de chaque siege, pour limiter le debit.
+    last_say: HashMap<Seat, Instant>,
     game_id: Option<Uuid>,
     occupants: [Occupant; 4],
     conns: Vec<Conn>,
@@ -154,6 +167,7 @@ impl TableActor {
             join_code,
             owner_id,
             autostart,
+            target,
             occupants,
         } = table;
 
@@ -165,6 +179,8 @@ impl TableActor {
             join_code,
             owner_id,
             autostart,
+            target,
+            last_say: HashMap::new(),
             game_id: None,
             occupants,
             conns: Vec::new(),
@@ -231,7 +247,7 @@ impl TableActor {
                     .send(ServerMsg::Welcome {
                         seat,
                         join_code: self.join_code.clone(),
-                        target: TARGET_POINTS,
+                        target: self.target,
                     })
                     .await;
 
@@ -303,6 +319,25 @@ impl TableActor {
                 }
                 self.start_match().await;
                 self.broadcast_seats();
+            }
+
+            Cmd::Say { user_id, phrase } => {
+                let Some(seat) = self.seat_of(user_id) else {
+                    return;
+                };
+                // Rang inconnu : le client ne parle pas le meme protocole, on
+                // ignore plutot que d'afficher n'importe quoi.
+                if phrase >= PHRASE_COUNT {
+                    return;
+                }
+                let now = Instant::now();
+                if let Some(last) = self.last_say.get(&seat) {
+                    if now.duration_since(*last) < SAY_COOLDOWN {
+                        return;
+                    }
+                }
+                self.last_say.insert(seat, now);
+                self.broadcast(ServerMsg::Said { seat, phrase });
             }
 
             Cmd::Resync { conn_id } => {
@@ -478,7 +513,7 @@ impl TableActor {
         }
 
         let high = self.totals[0].max(self.totals[1]);
-        if high >= TARGET_POINTS && self.totals[0] != self.totals[1] {
+        if high >= self.target && self.totals[0] != self.totals[1] {
             let winner = if self.totals[0] > self.totals[1] { 0 } else { 1 };
             self.winner = Some(winner);
 
@@ -727,16 +762,18 @@ pub struct TableRecord {
     pub join_code: String,
     pub owner_id: Uuid,
     pub autostart: bool,
+    pub target: u16,
     pub occupants: [Occupant; 4],
 }
 
 async fn load_table(pool: &PgPool, join_code: &str) -> ApiResult<TableRecord> {
-    let table: Option<(Uuid, Uuid, bool)> =
-        sqlx::query_as("select id, owner_id, autostart from game_tables where join_code = $1")
-            .bind(join_code)
-            .fetch_optional(pool)
-            .await?;
-    let (table_id, owner_id, autostart) = table.ok_or(ApiError::NotFound)?;
+    let table: Option<(Uuid, Uuid, bool, i32)> = sqlx::query_as(
+        "select id, owner_id, autostart, target_points from game_tables where join_code = $1",
+    )
+    .bind(join_code)
+    .fetch_optional(pool)
+    .await?;
+    let (table_id, owner_id, autostart, target) = table.ok_or(ApiError::NotFound)?;
 
     let rows: Vec<SeatRow> = sqlx::query_as(
         "select s.seat, s.user_id, u.display_name, s.is_bot
@@ -778,6 +815,7 @@ async fn load_table(pool: &PgPool, join_code: &str) -> ApiResult<TableRecord> {
         join_code: join_code.to_string(),
         owner_id,
         autostart,
+        target: target.clamp(1, u16::MAX as i32) as u16,
         occupants,
     })
 }

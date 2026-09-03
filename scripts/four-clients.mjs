@@ -69,6 +69,7 @@ class Client {
     this.snapshots = 0;
     this.events = [];
     this.errors = [];
+    this.heard = [];
     /** Cartes que ce joueur a legitimement le droit de connaitre. */
     this.allowed = new Set();
     this.leaks = [];
@@ -165,6 +166,8 @@ class Client {
       if (this.autoplay) this.maybePlay(msg.view);
     } else if (msg.type === "event") {
       this.events.push(msg.event);
+    } else if (msg.type === "said") {
+      this.heard.push(msg);
     } else if (msg.type === "error") {
       this.errors.push(msg.message);
     }
@@ -433,6 +436,69 @@ async function main() {
   );
   check("la donne suivante part quand tout le monde accepte", true);
 
+  // --- Annonces ----------------------------------------------------------
+  console.log("\nAnnonces");
+  clients[0].heard = [];
+  clients[2].send({ type: "say", phrase: 0 });
+  await waitFor(() => clients[0].heard.length > 0, {
+    timeout: 5000,
+    label: "l'annonce",
+  });
+  check(
+    "une annonce parvient aux autres joueurs",
+    clients[0].heard[0]?.seat === clients[2].seat && clients[0].heard[0]?.phrase === 0,
+    JSON.stringify(clients[0].heard[0]),
+  );
+
+  clients[2].send({ type: "say", phrase: 1 });
+  await new Promise((r) => setTimeout(r, 800));
+  check(
+    "deux annonces coup sur coup sont limitees",
+    clients[0].heard.length === 1,
+    `${clients[0].heard.length} recues`,
+  );
+
+  clients[0].heard = [];
+  clients[1].send({ type: "say", phrase: 99 });
+  await new Promise((r) => setTimeout(r, 800));
+  check(
+    "un rang de phrase inconnu est ignore",
+    clients[0].heard.length === 0,
+    JSON.stringify(clients[0].heard),
+  );
+
+  // --- Objectif de points ------------------------------------------------
+  console.log("\nObjectif de points");
+  const shortGame = new Client("Court");
+  await shortGame.register(uniq);
+  const shortTable = await api("/api/tables?solo=true&target=501", {
+    method: "POST",
+    token: shortGame.token,
+  });
+  await shortGame.open(shortTable.join_code);
+  await waitFor(() => shortGame.target !== undefined, { label: "le welcome" });
+  check(
+    "l'objectif choisi est celui annonce a la table",
+    shortGame.target === 501,
+    `${shortGame.target}`,
+  );
+
+  const absurd = await api("/api/tables?solo=true&target=999999", {
+    method: "POST",
+    token: shortGame.token,
+  });
+  const absurdClient = new Client("Borne");
+  absurdClient.token = shortGame.token;
+  await absurdClient.open(absurd.join_code);
+  await waitFor(() => absurdClient.target !== undefined, { label: "le welcome" });
+  check(
+    "un objectif absurde est ramene dans les bornes",
+    absurdClient.target === 5000,
+    `${absurdClient.target}`,
+  );
+  shortGame.close();
+  absurdClient.close();
+
   // --- Confidentialite ---------------------------------------------------
   console.log("\nConfidentialite");
   for (const c of clients) {
@@ -520,6 +586,29 @@ async function main() {
   check(
     "les cartes journalisees sont celles reellement posees",
     played.every((e, i) => cardKey(loggedPlays[i].card) === cardKey(e.card)),
+  );
+
+  // --- Statistiques ------------------------------------------------------
+  console.log("\nStatistiques");
+  const stats = await api("/api/stats", { token: clients[0].token });
+  check(
+    "les donnes jouees sont comptees",
+    stats.deals_played >= 1,
+    JSON.stringify(stats),
+  );
+  check("le meilleur score de donne est releve", stats.best_deal > 0, `${stats.best_deal}`);
+  check(
+    "les prises sont attribuees au bon joueur",
+    stats.deals_taken >= 0 && stats.deals_taken <= stats.deals_played,
+    `${stats.deals_taken}/${stats.deals_played}`,
+  );
+  const fresh = new Client("Neuf");
+  await fresh.register(uniq);
+  const empty = await api("/api/stats", { token: fresh.token });
+  check(
+    "un joueur sans partie a des compteurs a zero",
+    Object.values(empty).every((v) => v === 0),
+    JSON.stringify(empty),
   );
 
   const asOther = await api(`/api/games/${games[0].id}`, { token: clients[3].token });

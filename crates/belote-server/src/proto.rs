@@ -19,6 +19,10 @@ pub enum ClientMsg {
     Ready,
     /// Le proprietaire lance la table depuis le salon d'attente.
     Start,
+    /// Une annonce toute faite, designee par son rang dans une liste fermee.
+    /// Aucun texte redige par un joueur ne traverse le reseau : il n'y a donc
+    /// rien a moderer, ni a echapper a l'affichage.
+    Say { phrase: u8 },
     /// Redemande l'etat complet, apres une coupure reseau par exemple.
     Resync,
     Ping,
@@ -60,6 +64,8 @@ pub enum ServerMsg {
     Event { seq: u32, event: PublicEvent },
     /// Un joueur arrive ou part.
     Seats { seats: Vec<SeatInfo> },
+    /// Un joueur a lance une annonce.
+    Said { seat: Seat, phrase: u8 },
     /// Action refusee. N'est envoye qu'a son auteur.
     Error { message: String },
     Pong,

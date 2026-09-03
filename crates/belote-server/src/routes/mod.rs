@@ -2,6 +2,7 @@
 
 pub mod auth_routes;
 pub mod games;
+pub mod stats;
 pub mod tables;
 pub mod ws;
 
@@ -39,6 +40,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/tables/{code}/join", post(tables::join))
         .route("/api/games", get(games::list))
         .route("/api/games/{id}", get(games::show))
+        .route("/api/stats", get(stats::show))
         .route("/api/ws-ticket", post(ws::issue_ticket))
         .route("/ws", get(ws::connect))
         .layer(cors)

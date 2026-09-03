@@ -60,7 +60,14 @@ pub struct CreateParams {
     /// Faux pour une table entre amis, qui attend d'etre lancee.
     #[serde(default)]
     pub solo: bool,
+    /// Points a atteindre pour gagner le match.
+    pub target: Option<i32>,
 }
+
+/// Bornes de l'objectif : en deca c'est une donne unique, au-dela la partie
+/// ne finit jamais.
+const TARGET_MIN: i32 = 100;
+const TARGET_MAX: i32 = 5000;
 
 pub async fn create(
     State(state): State<AppState>,
@@ -68,20 +75,25 @@ pub async fn create(
     Query(params): Query<CreateParams>,
 ) -> ApiResult<Json<TableResponse>> {
     let table_id = Uuid::now_v7();
+    let target = params
+        .target
+        .unwrap_or(crate::table::DEFAULT_TARGET as i32)
+        .clamp(TARGET_MIN, TARGET_MAX);
 
     // Le code est court : une collision est possible, on reessaie.
     let mut join_code = String::new();
     for attempt in 0..8 {
         let candidate = generate_join_code();
         let inserted = sqlx::query(
-            "insert into game_tables (id, join_code, owner_id, autostart)
-             values ($1, $2, $3, $4)
+            "insert into game_tables (id, join_code, owner_id, autostart, target_points)
+             values ($1, $2, $3, $4, $5)
              on conflict (join_code) do nothing",
         )
         .bind(table_id)
         .bind(&candidate)
         .bind(user_id)
         .bind(params.solo)
+        .bind(target)
         .execute(&state.pool)
         .await?;
 

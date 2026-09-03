@@ -6,6 +6,7 @@ import { useState } from "react";
 
 import { Shell } from "@/components/Shell";
 import { ApiError, api } from "@/lib/api";
+import { primeAudio } from "@/lib/sound";
 import type { TableResponse } from "@/lib/types";
 import { useAuth } from "@/store/auth";
 
@@ -47,18 +48,23 @@ function SignedOut() {
 function Lobby() {
   const router = useRouter();
   const [code, setCode] = useState("");
+  const [target, setTarget] = useState(1000);
   const [busy, setBusy] = useState<"solo" | "friends" | "join" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Deux intentions distinctes : la partie solo demarre aussitot, la table
   // entre amis attend au salon le temps de partager son code.
   const create = async (solo: boolean) => {
+    // Premier geste de la session : le navigateur autorise le son a partir de
+    // la, il faut donc reveiller l'audio maintenant et pas au premier pli.
+    primeAudio();
     setBusy(solo ? "solo" : "friends");
     setError(null);
     try {
-      const table = await api<TableResponse>(`/api/tables?solo=${solo}`, {
-        method: "POST",
-      });
+      const table = await api<TableResponse>(
+        `/api/tables?solo=${solo}&target=${target}`,
+        { method: "POST" },
+      );
       router.push(`/table/${table.join_code}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Création impossible");
@@ -68,16 +74,17 @@ function Lobby() {
 
   const join = async (event: React.FormEvent) => {
     event.preventDefault();
-    const target = code.trim().toUpperCase();
-    if (target.length !== 6) {
+    const wanted = code.trim().toUpperCase();
+    if (wanted.length !== 6) {
       setError("Un code comporte 6 caractères.");
       return;
     }
+    primeAudio();
     setBusy("join");
     setError(null);
     try {
-      await api(`/api/tables/${target}/join`, { method: "POST" });
-      router.push(`/table/${target}`);
+      await api(`/api/tables/${wanted}/join`, { method: "POST" });
+      router.push(`/table/${wanted}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Impossible de rejoindre");
       setBusy(null);
@@ -113,6 +120,25 @@ function Lobby() {
           Vous obtenez un code à partager, et lancez quand tout le monde est là
         </span>
       </button>
+
+      <div className="flex items-center justify-center gap-2 text-xs">
+        <span className="text-bone-dim">Partie en</span>
+        {[501, 1000, 2000].map((value) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setTarget(value)}
+            className={`rounded-lg px-2.5 py-1 transition-colors ${
+              target === value
+                ? "bg-gold font-semibold text-ink-950"
+                : "bg-ink-900/70 text-bone-dim hover:text-bone"
+            }`}
+          >
+            {value}
+          </button>
+        ))}
+        <span className="text-bone-dim">points</span>
+      </div>
 
       <div className="flex items-center gap-3 text-xs text-bone-dim">
         <span className="h-px flex-1 bg-bone/15" />

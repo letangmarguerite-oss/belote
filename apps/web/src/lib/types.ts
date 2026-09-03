@@ -112,6 +112,7 @@ export type ServerMsg =
     }
   | { type: "event"; seq: number; event: PublicEvent }
   | { type: "seats"; seats: SeatInfo[] }
+  | { type: "said"; seat: Seat; phrase: number }
   | { type: "error"; message: string }
   | { type: "pong" };
 
@@ -125,6 +126,7 @@ export type ClientMsg =
   | { type: "act"; action: Action }
   | { type: "ready" }
   | { type: "start" }
+  | { type: "say"; phrase: number }
   | { type: "resync" }
   | { type: "ping" };
 
@@ -155,6 +157,17 @@ export interface TableResponse {
   status: string;
   owner_id: string;
   seats: TableSeat[];
+}
+
+export interface Stats {
+  games_finished: number;
+  games_won: number;
+  deals_played: number;
+  deals_taken: number;
+  deals_taken_made: number;
+  best_deal: number;
+  belotes: number;
+  capots: number;
 }
 
 export interface GameSummary {

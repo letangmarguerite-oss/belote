@@ -8,6 +8,7 @@ import {
   positionOf,
   type Position,
 } from "@/lib/cards";
+import { PHRASES } from "./QuickChat";
 import type { PlayerView, Seat, SeatInfo, Suit } from "@/lib/types";
 import type { HeldTrick } from "@/store/game";
 
@@ -17,10 +18,12 @@ interface Props {
   mySeat: Seat;
   /** Pli ramasse encore affiche, le temps qu'on le voie. */
   heldTrick: HeldTrick | null;
+  /** Annonces en cours d'affichage, par siege. */
+  says: Partial<Record<Seat, { phrase: number; id: number }>>;
 }
 
 /** Le tapis : les quatre joueurs autour, le pli en cours au centre. */
-export function TableFelt({ view, seats, mySeat, heldTrick }: Props) {
+export function TableFelt({ view, seats, mySeat, heldTrick, says }: Props) {
   const at = (position: Position) =>
     ([0, 1, 2, 3] as Seat[]).find((s) => positionOf(s, mySeat) === position)!;
 
@@ -28,23 +31,23 @@ export function TableFelt({ view, seats, mySeat, heldTrick }: Props) {
     <div className="relative mx-auto w-full max-w-3xl flex-1">
       <div className="grid h-full grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto] gap-1 sm:gap-3">
         <div className="col-span-3 flex justify-center">
-          <SeatPlate seat={at("north")} view={view} seats={seats} layout="row" />
+          <SeatPlate seat={at("north")} view={view} seats={seats} says={says} layout="row" />
         </div>
 
         <div className="flex items-center justify-start">
-          <SeatPlate seat={at("west")} view={view} seats={seats} layout="column" />
+          <SeatPlate seat={at("west")} view={view} seats={seats} says={says} layout="column" />
         </div>
 
         <Trick view={view} mySeat={mySeat} heldTrick={heldTrick} />
 
         <div className="flex items-center justify-end">
-          <SeatPlate seat={at("east")} view={view} seats={seats} layout="column" />
+          <SeatPlate seat={at("east")} view={view} seats={seats} says={says} layout="column" />
         </div>
 
         {/* Mon propre bandeau : sans lui je ne saurais pas que je suis
             preneur ou donneur, alors que je le vois pour les autres. */}
         <div className="col-span-3 flex justify-center">
-          <SeatPlate seat={mySeat} view={view} seats={seats} layout="none" />
+          <SeatPlate seat={mySeat} view={view} seats={seats} says={says} layout="none" />
         </div>
       </div>
     </div>
@@ -87,22 +90,30 @@ function SeatPlate({
   seat,
   view,
   seats,
+  says,
   layout,
 }: {
   seat: Seat;
   view: PlayerView;
   seats: SeatInfo[];
+  says: Partial<Record<Seat, { phrase: number; id: number }>>;
   /** "none" pour mon siege : ma main est affichee en dessous. */
   layout: "row" | "column" | "none";
 }) {
   const info = seats.find((s) => s.seat === seat);
+  const said = says[seat];
   const count = view.hand_sizes[seat];
   const isTurn = view.turn === seat && view.phase !== "finished";
   const isTaker = view.taker === seat;
   const isDealer = view.dealer === seat;
 
   return (
-    <div className="flex flex-col items-center gap-1.5">
+    <div className="relative flex flex-col items-center gap-1.5">
+      {said && (
+        <div className="animate-flash panel absolute -top-8 z-40 whitespace-nowrap px-2.5 py-1 text-xs text-bone">
+          {PHRASES[said.phrase] ?? ""}
+        </div>
+      )}
       <div
         className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition-colors sm:text-sm ${
           isTurn

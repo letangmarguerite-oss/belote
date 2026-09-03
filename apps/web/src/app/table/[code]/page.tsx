@@ -6,6 +6,8 @@ import { useEffect } from "react";
 import { BidPanel } from "@/components/BidPanel";
 import { Hand } from "@/components/Hand";
 import { Lobby } from "@/components/Lobby";
+import { QuickChat } from "@/components/QuickChat";
+import { Settings } from "@/components/Settings";
 import { Scoreboard, TableFelt } from "@/components/TableFelt";
 import { Shell } from "@/components/Shell";
 import { SUIT_LABEL, SUIT_SYMBOL, isRed } from "@/lib/cards";
@@ -33,6 +35,7 @@ function Game({ code }: { code: string }) {
     act,
     sendReady,
     sendStart,
+    say,
     status,
     view,
     seats,
@@ -45,6 +48,7 @@ function Game({ code }: { code: string }) {
     inLobby,
     canStart,
     heldTrick,
+    says,
     flashes,
     error,
     dismissError,
@@ -98,13 +102,18 @@ function Game({ code }: { code: string }) {
         </Banner>
       )}
 
-      <Scoreboard view={view} totals={totals} mySeat={mySeat} carry={carry} />
+      <div className="flex items-center justify-between gap-2">
+        <div className="w-9 shrink-0" />
+        <Scoreboard view={view} totals={totals} mySeat={mySeat} carry={carry} />
+        <Settings />
+      </div>
 
       <TableFelt
         view={view}
         seats={seats}
         mySeat={mySeat}
         heldTrick={heldTrick}
+        says={says}
       />
 
       <div className="pointer-events-none flex flex-col items-center gap-1">
@@ -134,13 +143,20 @@ function Game({ code }: { code: string }) {
         />
       )}
 
-      <Hand
-        hand={view.hand}
-        legal={view.legal}
-        myTurn={myTurn}
-        trump={view.trump}
-        onPlay={(card) => act({ type: "play", card })}
-      />
+      <div className="flex items-end gap-2">
+        <div className="min-w-0 flex-1">
+          <Hand
+            hand={view.hand}
+            legal={view.legal}
+            myTurn={myTurn}
+            trump={view.trump}
+            onPlay={(card) => act({ type: "play", card })}
+          />
+        </div>
+        <div className="shrink-0 pb-1">
+          <QuickChat onSay={say} />
+        </div>
+      </div>
 
       {error && (
         <button

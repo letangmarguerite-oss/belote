@@ -2,7 +2,9 @@
 
 import { create } from "zustand";
 
+import { buzz, sounds } from "@/lib/sound";
 import { GameSocket, type SocketStatus } from "@/lib/ws";
+import { useSettings } from "./settings";
 import type {
   Action,
   PlayedCard,
@@ -27,6 +29,18 @@ export interface HeldTrick {
 
 /** Duree d'affichage du pli ramasse. Le serveur observe la meme pause. */
 const TRICK_HOLD_MS = 1600;
+/** Duree d'affichage d'une bulle d'annonce. */
+const SAY_HOLD_MS = 3200;
+
+/** Joue un son si le joueur les a laisses actifs. */
+function chime(play: () => void) {
+  if (useSettings.getState().sound) play();
+}
+
+/** Vibre si le joueur l'a laisse actif. Sans effet sur un ordinateur. */
+function haptic(pattern?: number | number[]) {
+  if (useSettings.getState().vibrate) buzz(pattern);
+}
 
 interface GameState {
   socket: GameSocket | null;
@@ -45,6 +59,8 @@ interface GameState {
   canStart: boolean;
   /** Le pli qui vient d'etre ramasse, encore affiche. */
   heldTrick: HeldTrick | null;
+  /** Annonce en cours d'affichage pour chaque siege. */
+  says: Partial<Record<Seat, { phrase: number; id: number }>>;
   flashes: Flash[];
   error: string | null;
 
@@ -53,10 +69,13 @@ interface GameState {
   act: (action: Action) => void;
   sendReady: () => void;
   sendStart: () => void;
+  say: (phrase: number) => void;
   dismissError: () => void;
 }
 
 let flashId = 0;
+/** Pour ne sonner qu'au moment ou le tour arrive, pas a chaque instantane. */
+let wasMyTurn = false;
 /** Cartes du pli en cours, reconstituees au fil des evenements. */
 let running: PlayedCard[] = [];
 let holdTimer: ReturnType<typeof setTimeout> | null = null;
@@ -77,6 +96,7 @@ export const useGame = create<GameState>((set, get) => ({
   inLobby: true,
   canStart: false,
   heldTrick: null,
+  says: {},
   flashes: [],
   error: null,
 
@@ -97,7 +117,8 @@ export const useGame = create<GameState>((set, get) => ({
       },
     });
 
-    set({ socket, joinCode: code, error: null, heldTrick: null });
+    wasMyTurn = false;
+    set({ socket, joinCode: code, error: null, heldTrick: null, says: {} });
     void socket.connect();
   },
 
@@ -113,6 +134,7 @@ export const useGame = create<GameState>((set, get) => ({
       seats: [],
       flashes: [],
       heldTrick: null,
+      says: {},
     });
   },
 
@@ -121,6 +143,8 @@ export const useGame = create<GameState>((set, get) => ({
   sendReady: () => get().socket?.send({ type: "ready" }),
 
   sendStart: () => get().socket?.send({ type: "start" }),
+
+  say: (phrase) => get().socket?.send({ type: "say", phrase }),
 
   dismissError: () => set({ error: null }),
 }));
@@ -153,11 +177,41 @@ function applyMessage(msg: ServerMsg, set: Setter, get: Getter) {
         running = msg.view.trick;
         clearHold(set);
       }
+
+      // Signaler l'arrivee du tour, une seule fois : un instantane est renvoye
+      // a chaque coup, y compris pendant que c'est deja a moi.
+      {
+        const mine =
+          msg.view.turn === msg.view.seat &&
+          (msg.view.phase === "playing" ||
+            msg.view.phase === "bidding1" ||
+            msg.view.phase === "bidding2");
+        if (mine && !wasMyTurn) {
+          chime(sounds.turn);
+          haptic();
+        }
+        wasMyTurn = mine;
+      }
       break;
 
     case "seats":
       set({ seats: msg.seats });
       break;
+
+    case "said": {
+      const id = ++flashId;
+      set({ says: { ...get().says, [msg.seat]: { phrase: msg.phrase, id } } });
+      // Ma propre annonce ne me surprend pas : pas de son pour elle.
+      if (msg.seat !== get().mySeat) chime(sounds.chat);
+      setTimeout(() => {
+        const current = get().says[msg.seat];
+        if (current?.id !== id) return; // une annonce plus recente l'a remplacee
+        const next = { ...get().says };
+        delete next[msg.seat];
+        set({ says: next });
+      }, SAY_HOLD_MS);
+      break;
+    }
 
     case "event":
       handleEvent(msg.event, set, get);
@@ -208,6 +262,7 @@ function handleEvent(event: PublicEvent, set: Setter, get: Getter) {
         ...running.filter((p) => p.seat !== event.seat),
         { seat: event.seat, card: event.card },
       ];
+      chime(sounds.card);
       break;
 
     case "trick_taken": {
@@ -224,6 +279,7 @@ function handleEvent(event: PublicEvent, set: Setter, get: Getter) {
           set({ heldTrick: null });
         }, TRICK_HOLD_MS);
       }
+      chime(sounds.trick);
       if (event.last) flash("Dix de der");
       break;
     }
@@ -254,6 +310,11 @@ function handleEvent(event: PublicEvent, set: Setter, get: Getter) {
 
     case "redeal":
       flash("Personne ne prend, on redistribue");
+      break;
+
+    case "scored":
+      chime(sounds.dealEnd);
+      haptic([12, 60, 12]);
       break;
 
     default:
